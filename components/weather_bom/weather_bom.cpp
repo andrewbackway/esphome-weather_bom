@@ -57,61 +57,48 @@ void WeatherBOM::dump_config() {
   LOG_TEXT_SENSOR("  ", "Out Geohash", this->out_geohash_);
   LOG_TEXT_SENSOR("  ", "Last Update", this->last_update_);
 }
-
 void WeatherBOM::setup() {
-#ifndef USE_ESP_IDF
-  ESP_LOGE(TAG, "This component requires ESP-IDF framework.");
-  return;
-#else
+#ifdef USE_ESP_IDF
   ESP_LOGD(TAG, "Setting up WeatherBOM component");
 
-  // Subscribe to lat/lon sensors
+  // Latitude and longitude callbacks (unchanged)
   if (this->lat_sensor_ != nullptr) {
     this->lat_sensor_->add_on_state_callback([this](float v) {
-      ESP_LOGD(TAG, "Received latitude from sensor: %f", v);
       this->dynamic_lat_ = v;
       this->have_dynamic_ = !std::isnan(v) && !std::isnan(this->dynamic_lon_);
-      ESP_LOGD(TAG, "Updated have_dynamic: %d", this->have_dynamic_);
       if (this->have_dynamic_ && this->geohash_.empty()) {
-        ESP_LOGD(TAG, "First valid lat/lon received, triggering update");
         this->update();
       }
     });
   }
   if (this->lon_sensor_ != nullptr) {
     this->lon_sensor_->add_on_state_callback([this](float v) {
-      ESP_LOGD(TAG, "Received longitude from sensor: %f", v);
       this->dynamic_lon_ = v;
       this->have_dynamic_ = !std::isnan(this->dynamic_lat_) && !std::isnan(v);
-      ESP_LOGD(TAG, "Updated have_dynamic: %d", this->have_dynamic_);
       if (this->have_dynamic_ && this->geohash_.empty()) {
-        ESP_LOGD(TAG, "First valid lat/lon received, triggering update");
         this->update();
       }
     });
   }
 
-  if (!this->geohash_.empty() && this->out_geohash_ != nullptr) {
-    this->out_geohash_->publish_state(this->geohash_);
-    ESP_LOGD(TAG, "Published initial geohash: %s", this->geohash_.c_str());
-  }
-
-  // Trigger initial update if already connected (via Network component)
-  if (network::global_network_component != nullptr &&
-      network::global_network_component->is_connected()) {
-    ESP_LOGD(TAG, "Network already connected during setup, triggering initial update");
+  // If we already have Wi-Fi on boot, run an update
+  if (wifi::global_wifi_component != nullptr &&
+      wifi::global_wifi_component->is_connected()) {
+    ESP_LOGD(TAG, "WiFi already connected, starting initial update");
     this->update();
   }
 
-  // Also update when the network comes up later (replaces old WiFi on_connect callback)
-  if (network::global_network_component != nullptr) {
-    network::global_network_component->add_on_connect_callback([this]() {
-      ESP_LOGD(TAG, "Network connected callback, triggering update");
+  // ✅ Register WiFi event callback (modern, working in ESP-IDF)
+  WiFi.onEvent([this](arduino_event_id_t event, arduino_event_info_t info) {
+    if (event == ARDUINO_EVENT_WIFI_STA_CONNECTED) {
+      ESP_LOGD(TAG, "Detected WiFi connection event, updating now...");
       this->update();
-    });
-  }
+    }
+  });
+
 #endif
 }
+
 
 void WeatherBOM::update() {
 #ifndef USE_ESP_IDF
