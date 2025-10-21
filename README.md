@@ -27,34 +27,49 @@ Works entirely on-device using **ESP-IDF** networking and TLS, ideal for custom 
 ## ⚙️ YAML Example
 
 ```yaml
-esphome:
-  name: bom_direct
-  friendly_name: BOM Direct Weather
 
+esphome:
+  name: WeatherBom
+  friendly_name: BOM Weather
+  
 esp32:
   board: esp32-s3-devkitc-1
   framework:
     type: esp-idf
 
-# Wi-Fi and time configuration (required for timestamps)
+external_components:
+  - source: github://andrewbackway/esphome-weather_bom@main
+    refresh: 1s
+
+logger:
+  level: DEBUG
+
+api:
+
 wifi:
-  ssid: !secret wifi_ssid
-  password: !secret wifi_password
+  - ssid: !secret wifi_ssid
+    password: !secret wifi_password
+
+captive_portal:
+
+web_server:
+  version: 3
 
 time:
   - platform: sntp
     id: sntp_time
-
-external_components:
-  - source: /config/external_components
-    components: [weather_bom]
+    timezone: Melbourne/Australia
+    servers:
+      - 0.au.pool.ntp.org
+      - 1.au.pool.ntp.org
+      - 2.au.pool.ntp.org
 
 sensor:
   - platform: template
     id: gps_lat
     name: "GPS Latitude"
     lambda: |-
-      return -37.8136;  # Melbourne
+      return -37.8136;
   - platform: template
     id: gps_lon
     name: "GPS Longitude"
@@ -67,46 +82,61 @@ weather_bom:
   update_interval: 300s
 
   temperature:
-    name: "Temperature"
+    name: "Weather Temperature"
   humidity:
-    name: "Humidity"
+    name: "Weather Humidity"
   wind_speed_kmh:
-    name: "Wind Speed (km/h)"
+    name: "Weather Wind Speed (km/h)"
+  rain_since_9am:
+    name: "Weather Rain Since 9AM"
 
   today_min:
-    name: "Today Min Temp"
+    name: "Weather Today Min Temp"
   today_max:
-    name: "Today Max Temp"
+    name: "Weather Today Max Temp"
   today_rain_chance:
-    name: "Today Rain Chance"
-  today_rain_amount:
-    name: "Today Rain Amount"
+    name: "Weather Today Rain Chance"
   today_summary:
-    name: "Today Summary"
+    name: "Weather Today Summary"
   today_icon:
-    name: "Today Icon"
-
+    name: "Weather Today Icon"
+  today_rain_min:
+    name: "Today's Rain Min"
+  today_rain_max:
+    name: "Today's Rain Max"
+  today_sunrise:
+    name: "Today's Sunrise"
+  today_sunset:
+    name: "Today's Sunset"
+    
   tomorrow_min:
-    name: "Tomorrow Min Temp"
+    name: "Weather Tomorrow Min Temp"
   tomorrow_max:
-    name: "Tomorrow Max Temp"
+    name: "Weather Tomorrow Max Temp"
   tomorrow_rain_chance:
-    name: "Tomorrow Rain Chance"
-  tomorrow_rain_amount:
-    name: "Tomorrow Rain Amount"
+    name: "Weather Tomorrow Rain Chance"
   tomorrow_summary:
-    name: "Tomorrow Summary"
+    name: "Weather Tomorrow Summary"
   tomorrow_icon:
-    name: "Tomorrow Icon"
+    name: "Weather Tomorrow Icon"
+  tomorrow_rain_min:
+    name: "Tomorrow Rain Min"
+  tomorrow_rain_max:
+    name: "Tomorrow Rain Max"
+  tomorrow_sunrise:
+    name: "Tomorrow Sunrise"
+  tomorrow_sunset:
+    name: "Tomorrow Sunset"
+
 
   warnings_json:
     name: "Weather Warnings (JSON)"
   location_name:
-    name: "Location Name"
+    name: "Weather Location Name"
   out_geohash:
-    name: "Resolved Geohash"
+    name: "Weather Resolved Geohash"
   last_update:
-    name: "Last Update Time"
+    name: "Weather Last Update Time"
 ```
 
 ---
@@ -116,8 +146,8 @@ weather_bom:
 | Category | ID | Type | Description |
 |-----------|----|------|-------------|
 | **Observations** | `temperature`, `humidity`, `wind_speed_kmh` | Sensor | Current BoM observations |
-| **Forecast (Today)** | `today_min`, `today_max`, `today_rain_chance`, `today_rain_amount`, `today_summary`, `today_icon` | Sensor/Text | Current day forecast |
-| **Forecast (Tomorrow)** | `tomorrow_min`, `tomorrow_max`, `tomorrow_rain_chance`, `tomorrow_rain_amount`, `tomorrow_summary`, `tomorrow_icon` | Sensor/Text | Next day forecast |
+| **Forecast (Today)** | `today_min`, `today_max`, `today_rain_chance`, `today_rain_min`, `today_rain_max`, `today_summary`, `today_icon` | Sensor/Text | Current day forecast |
+| **Forecast (Tomorrow)** | `tomorrow_min`, `tomorrow_max`, `tomorrow_rain_chance`, `tomorrow_rain_min`, `tomorrow_rain_max` , `tomorrow_summary`, `tomorrow_icon` | Sensor/Text | Next day forecast |
 | **Metadata** | `warnings_json`, `location_name`, `out_geohash`, `last_update` | TextSensor | JSON warnings, location info, update time |
 
 ---
@@ -139,7 +169,6 @@ weather_bom:
 ## ⚠️ Notes & Limitations
 
 - ⚙️ Requires **ESP-IDF** framework (not Arduino).  
-- 🕒 Requires a valid `time:` platform for timestamps.  
 - 🌧️ API is **unofficial** — schema changes may occur; the component is defensive.  
 - 🧠 Update interval default is 5 minutes (300 s).  
 - 📶 Keep requests modest to avoid server throttling.  

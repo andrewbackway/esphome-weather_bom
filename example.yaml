@@ -1,6 +1,51 @@
+
+esphome:
+  name: WeatherBom
+  friendly_name: BOM Weather
+  
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
 external_components:
-  - source: /config/external_components
-    components: [weather_bom]
+  - source: github://andrewbackway/esphome-weather_bom@main
+    refresh: 1s
+
+logger:
+  level: DEBUG
+
+api:
+
+wifi:
+  - ssid: !secret wifi_ssid
+    password: !secret wifi_password
+
+captive_portal:
+
+web_server:
+  version: 3
+
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Melbourne/Australia
+    servers:
+      - 0.au.pool.ntp.org
+      - 1.au.pool.ntp.org
+      - 2.au.pool.ntp.org
+
+sensor:
+  - platform: template
+    id: gps_lat
+    name: "GPS Latitude"
+    lambda: |-
+      return -37.8136;
+  - platform: template
+    id: gps_lon
+    name: "GPS Longitude"
+    lambda: |-
+      return 144.9631;
 
 weather_bom:
   latitude_sensor: gps_lat
@@ -8,43 +53,58 @@ weather_bom:
   update_interval: 300s
 
   temperature:
-    name: "BOM Temperature"
+    name: "Weather Temperature"
   humidity:
-    name: "BOM Humidity"
+    name: "Weather Humidity"
   wind_speed_kmh:
-    name: "BOM Wind"
+    name: "Weather Wind Speed (km/h)"
+  rain_since_9am:
+    name: "Weather Rain Since 9AM"
 
   today_min:
-    name: "Today Min"
+    name: "Weather Today Min Temp"
   today_max:
-    name: "Today Max"
+    name: "Weather Today Max Temp"
   today_rain_chance:
-    name: "Today Rain Chance"
-  today_rain_amount:
-    name: "Today Rain Amount"
+    name: "Weather Today Rain Chance"
   today_summary:
-    name: "Today Summary"
+    name: "Weather Today Summary"
   today_icon:
-    name: "Today Icon"
-
+    name: "Weather Today Icon"
+  today_rain_min:
+    name: "Today's Rain Min"
+  today_rain_max:
+    name: "Today's Rain Max"
+  today_sunrise:
+    name: "Today's Sunrise"
+  today_sunset:
+    name: "Today's Sunset"
+    
   tomorrow_min:
-    name: "Tomorrow Min"
+    name: "Weather Tomorrow Min Temp"
   tomorrow_max:
-    name: "Tomorrow Max"
+    name: "Weather Tomorrow Max Temp"
   tomorrow_rain_chance:
-    name: "Tomorrow Rain Chance"
-  tomorrow_rain_amount:
-    name: "Tomorrow Rain Amount"
+    name: "Weather Tomorrow Rain Chance"
   tomorrow_summary:
-    name: "Tomorrow Summary"
+    name: "Weather Tomorrow Summary"
   tomorrow_icon:
-    name: "Tomorrow Icon"
+    name: "Weather Tomorrow Icon"
+  tomorrow_rain_min:
+    name: "Tomorrow Rain Min"
+  tomorrow_rain_max:
+    name: "Tomorrow Rain Max"
+  tomorrow_sunrise:
+    name: "Tomorrow Sunrise"
+  tomorrow_sunset:
+    name: "Tomorrow Sunset"
+
 
   warnings_json:
-    name: "Warnings JSON"
+    name: "Weather Warnings (JSON)"
   location_name:
-    name: "Location Name"
+    name: "Weather Location Name"
   out_geohash:
-    name: "Resolved Geohash"
+    name: "Weather Resolved Geohash"
   last_update:
-    name: "Last Update"
+    name: "Weather Last Update Time"
