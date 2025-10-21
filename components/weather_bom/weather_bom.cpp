@@ -97,7 +97,7 @@ void WeatherBOM::setup() {
   }
 
   // Register WiFi connect callback
-  wifi::global_wifi_component->add_on_sta_connected_callback([this]() {
+  wifi::global_wifi_component->add_on_connect_callback([this]() {
     ESP_LOGD(TAG, "WiFi connected, triggering update");
     this->update();
   });
