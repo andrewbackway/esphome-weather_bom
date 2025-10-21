@@ -147,7 +147,12 @@ CONFIG_SCHEMA = cv.All(
             ),
             cv.Optional(CONF_TODAY_SUMMARY): text_sensor.text_sensor_schema(),
             cv.Optional(CONF_TODAY_ICON): text_sensor.text_sensor_schema(),
-
+            cv.Optional(CONF_TODAY_SUNRISE): text_sensor.text_sensor_schema(
+                icon=ICON_CLOCK
+            ),
+            cv.Optional(CONF_TODAY_SUNSET): text_sensor.text_sensor_schema(
+                icon=ICON_CLOCK
+            ),
             # Tomorrow
             cv.Optional(CONF_TOMORROW_MIN): sensor.sensor_schema(
                 unit_of_measurement="°C",
@@ -172,7 +177,12 @@ CONFIG_SCHEMA = cv.All(
             ),
             cv.Optional(CONF_TOMORROW_SUMMARY): text_sensor.text_sensor_schema(),
             cv.Optional(CONF_TOMORROW_ICON): text_sensor.text_sensor_schema(),
-
+            cv.Optional(CONF_TOMORROW_SUNRISE): text_sensor.text_sensor_schema(
+                icon=ICON_CLOCK
+            ),
+            cv.Optional(CONF_TOMORROW_SUNSET): text_sensor.text_sensor_schema(
+                icon=ICON_CLOCK
+            ),
             # Meta
             cv.Optional(CONF_WARNINGS_JSON): text_sensor.text_sensor_schema(
                 icon=ICON_ALERT
