@@ -34,17 +34,24 @@ CONF_RAIN_SINCE_9AM = "rain_since_9am"
 CONF_TODAY_MIN = "today_min"
 CONF_TODAY_MAX = "today_max"
 CONF_TODAY_RAIN_CHANCE = "today_rain_chance"
-CONF_TODAY_RAIN_AMOUNT = "today_rain_amount"
 CONF_TODAY_SUMMARY = "today_summary"
 CONF_TODAY_ICON = "today_icon"
+CONF_TODAY_RAIN_MIN = "today_rain_min"
+CONF_TODAY_RAIN_MAX = "today_rain_max"
+CONF_TODAY_SUNRISE = "today_sunrise"
+CONF_TODAY_SUNSET = "today_sunset"
+
 
 # Forecast Tomorrow
 CONF_TOMORROW_MIN = "tomorrow_min"
 CONF_TOMORROW_MAX = "tomorrow_max"
 CONF_TOMORROW_RAIN_CHANCE = "tomorrow_rain_chance"
-CONF_TOMORROW_RAIN_AMOUNT = "tomorrow_rain_amount"
 CONF_TOMORROW_SUMMARY = "tomorrow_summary"
 CONF_TOMORROW_ICON = "tomorrow_icon"
+CONF_TOMORROW_RAIN_MIN = "tomorrow_rain_min"
+CONF_TOMORROW_RAIN_MAX = "tomorrow_rain_max"
+CONF_TOMORROW_SUNRISE = "tomorrow_sunrise"
+CONF_TOMORROW_SUNSET = "tomorrow_sunset"
 
 # Meta
 CONF_WARNINGS_JSON = "warnings_json"
@@ -132,7 +139,10 @@ CONFIG_SCHEMA = cv.All(
                 icon=ICON_RAIN_CHANCE,
                 accuracy_decimals=0
             ),
-            cv.Optional(CONF_TODAY_RAIN_AMOUNT): text_sensor.text_sensor_schema(
+            cv.Optional(CONF_TODAY_RAIN_MIN): sensor.sensor_schema(
+                icon=ICON_RAIN_AMOUNT
+            ),
+            cv.Optional(CONF_TODAY_RAIN_MAX): sensor.sensor_schema(
                 icon=ICON_RAIN_AMOUNT
             ),
             cv.Optional(CONF_TODAY_SUMMARY): text_sensor.text_sensor_schema(),
@@ -154,7 +164,10 @@ CONFIG_SCHEMA = cv.All(
                 icon=ICON_RAIN_CHANCE,
                 accuracy_decimals=0
             ),
-            cv.Optional(CONF_TOMORROW_RAIN_AMOUNT): text_sensor.text_sensor_schema(
+            cv.Optional(CONF_TOMORROW_RAIN_MIN): sensor.sensor_schema(
+                icon=ICON_RAIN_AMOUNT
+            ),
+            cv.Optional(CONF_TOMORROW_RAIN_MAX): sensor.sensor_schema(
                 icon=ICON_RAIN_AMOUNT
             ),
             cv.Optional(CONF_TOMORROW_SUMMARY): text_sensor.text_sensor_schema(),
@@ -212,17 +225,23 @@ async def to_code(config):
     await _reg(CONF_TODAY_MIN, "set_today_min_sensor")
     await _reg(CONF_TODAY_MAX, "set_today_max_sensor")
     await _reg(CONF_TODAY_RAIN_CHANCE, "set_today_rain_chance_sensor")
-    await _reg_text(CONF_TODAY_RAIN_AMOUNT, "set_today_rain_amount_text")
     await _reg_text(CONF_TODAY_SUMMARY, "set_today_summary_text")
     await _reg_text(CONF_TODAY_ICON, "set_today_icon_text")
+    await _reg(CONF_TODAY_RAIN_MIN, "set_today_rain_min_sensor")
+    await _reg(CONF_TODAY_RAIN_MAX, "set_today_rain_max_sensor")
+    await _reg_text(CONF_TODAY_SUNRISE, "set_today_sunrise_text")
+    await _reg_text(CONF_TODAY_SUNSET, "set_today_sunset_text")
 
     # Tomorrow
     await _reg(CONF_TOMORROW_MIN, "set_tomorrow_min_sensor")
     await _reg(CONF_TOMORROW_MAX, "set_tomorrow_max_sensor")
     await _reg(CONF_TOMORROW_RAIN_CHANCE, "set_tomorrow_rain_chance_sensor")
-    await _reg_text(CONF_TOMORROW_RAIN_AMOUNT, "set_tomorrow_rain_amount_text")
     await _reg_text(CONF_TOMORROW_SUMMARY, "set_tomorrow_summary_text")
     await _reg_text(CONF_TOMORROW_ICON, "set_tomorrow_icon_text")
+    await _reg(CONF_TOMORROW_RAIN_MIN, "set_tomorrow_rain_min_sensor")
+    await _reg(CONF_TOMORROW_RAIN_MAX, "set_tomorrow_rain_max_sensor")
+    await _reg_text(CONF_TOMORROW_SUNRISE, "set_tomorrow_sunrise_text")
+    await _reg_text(CONF_TOMORROW_SUNSET, "set_tomorrow_sunset_text")
 
     # Meta
     await _reg_text(CONF_WARNINGS_JSON, "set_warnings_json_text")

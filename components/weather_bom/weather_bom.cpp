@@ -173,8 +173,8 @@ void WeatherBOM::do_fetch() {
 #endif
 }
 
-void WeatherBOM::process_task(void *pv) {
-  auto *self = static_cast<WeatherBOM *>(pv);
+void WeatherBOM::process_task(void* pv) {
+  auto* self = static_cast<WeatherBOM*>(pv);
 
   // Parse and publish data (runs off main loop)
   self->process_data();
@@ -248,47 +248,46 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
     return false;
   }
 
-bool ok = false;
-cJSON* data = cJSON_GetObjectItemCaseSensitive(root, "data");
-if (data && cJSON_IsArray(data) && cJSON_GetArraySize(data) > 0) {
-  cJSON* first = cJSON_GetArrayItem(data, 0);
-  cJSON* gh = cJSON_GetObjectItemCaseSensitive(first, "geohash");
-  cJSON* nm = cJSON_GetObjectItemCaseSensitive(first, "name");
+  bool ok = false;
+  cJSON* data = cJSON_GetObjectItemCaseSensitive(root, "data");
+  if (data && cJSON_IsArray(data) && cJSON_GetArraySize(data) > 0) {
+    cJSON* first = cJSON_GetArrayItem(data, 0);
+    cJSON* gh = cJSON_GetObjectItemCaseSensitive(first, "geohash");
+    cJSON* nm = cJSON_GetObjectItemCaseSensitive(first, "name");
 
-  if (cJSON_IsString(gh) && gh->valuestring != nullptr) {
-    std::string full_geohash = gh->valuestring;
+    if (cJSON_IsString(gh) && gh->valuestring != nullptr) {
+      std::string full_geohash = gh->valuestring;
 
-    // ✅ Truncate to first 6 chars for BOM compatibility
-    if (full_geohash.length() > 6) {
-      ESP_LOGW(TAG,
-               "Geohash '%s' too long (%d). Truncating to '%s' for BOM API.",
-               full_geohash.c_str(),
-               full_geohash.length(),
-               full_geohash.substr(0, 6).c_str());
-      this->geohash_ = full_geohash.substr(0, 6);
+      // ✅ Truncate to first 6 chars for BOM compatibility
+      if (full_geohash.length() > 6) {
+        ESP_LOGW(TAG,
+                 "Geohash '%s' too long (%d). Truncating to '%s' for BOM API.",
+                 full_geohash.c_str(), full_geohash.length(),
+                 full_geohash.substr(0, 6).c_str());
+        this->geohash_ = full_geohash.substr(0, 6);
+      } else {
+        this->geohash_ = full_geohash;
+      }
+
+      ok = true;
+      ESP_LOGD(TAG, "Using geohash: %s", this->geohash_.c_str());
+
+      if (this->out_geohash_) {
+        this->out_geohash_->publish_state(this->geohash_);
+      }
     } else {
-      this->geohash_ = full_geohash;
+      ESP_LOGW(TAG, "No geohash in response");
     }
 
-    ok = true;
-    ESP_LOGD(TAG, "Using geohash: %s", this->geohash_.c_str());
-
-    if (this->out_geohash_) {
-      this->out_geohash_->publish_state(this->geohash_);
+    // ✅ Publish location name only if available
+    if (cJSON_IsString(nm) && nm->valuestring && this->location_name_) {
+      this->location_name_->publish_state(nm->valuestring);
+      ESP_LOGD(TAG, "Location name: %s", nm->valuestring);
     }
+
   } else {
-    ESP_LOGW(TAG, "No geohash in response");
+    ESP_LOGW(TAG, "No 'data' array or response was empty");
   }
-
-  // ✅ Publish location name only if available
-  if (cJSON_IsString(nm) && nm->valuestring && this->location_name_) {
-    this->location_name_->publish_state(nm->valuestring);
-    ESP_LOGD(TAG, "Location name: %s", nm->valuestring);
-  }
-
-} else {
-  ESP_LOGW(TAG, "No 'data' array or response was empty");
-}
 
   cJSON_Delete(root);
 
@@ -373,50 +372,49 @@ bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
 #endif
 }
 
-void WeatherBOM::parse_and_publish_observations_(const std::string &json) {
+void WeatherBOM::parse_and_publish_observations_(const std::string& json) {
 #ifndef USE_ESP_IDF
   return;
 #else
   ESP_LOGD(TAG, "Parsing observations JSON: %.100s...", json.c_str());
 
-  cJSON *root = cJSON_ParseWithLength(json.c_str(), json.size());
+  cJSON* root = cJSON_ParseWithLength(json.c_str(), json.size());
   if (!root) {
     ESP_LOGW(TAG, "Failed to parse observations JSON");
     return;
   }
 
-  cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+  cJSON* data = cJSON_GetObjectItemCaseSensitive(root, "data");
   if (cJSON_IsObject(data)) {
-
     // Temperature
-    cJSON *temp = cJSON_GetObjectItemCaseSensitive(data, "temp");
+    cJSON* temp = cJSON_GetObjectItemCaseSensitive(data, "temp");
     if (cJSON_IsNumber(temp)) {
-      float val = (float) temp->valuedouble;
+      float val = (float)temp->valuedouble;
       ESP_LOGD(TAG, "Temperature: %f", val);
       if (this->temperature_) this->temperature_->publish_state(val);
     }
 
     // Rain since 9 AM
-    cJSON *rain = cJSON_GetObjectItemCaseSensitive(data, "rain_since_9am");
+    cJSON* rain = cJSON_GetObjectItemCaseSensitive(data, "rain_since_9am");
     if (cJSON_IsNumber(rain)) {
-      float val = (float) rain->valuedouble;
+      float val = (float)rain->valuedouble;
       ESP_LOGD(TAG, "Rain since 9AM: %f", val);
       if (this->rain_since_9am_) this->rain_since_9am_->publish_state(val);
     }
 
     //  Humidity
-    cJSON *hum = cJSON_GetObjectItemCaseSensitive(data, "humidity");
+    cJSON* hum = cJSON_GetObjectItemCaseSensitive(data, "humidity");
     if (cJSON_IsNumber(hum)) {
-      float val = (float) hum->valuedouble;
+      float val = (float)hum->valuedouble;
       if (this->humidity_) this->humidity_->publish_state(val);
     }
 
     // Wind data
     float wind_val = NAN;
-    cJSON *wind = cJSON_GetObjectItemCaseSensitive(data, "wind");
+    cJSON* wind = cJSON_GetObjectItemCaseSensitive(data, "wind");
     if (cJSON_IsObject(wind)) {
-      cJSON *kmh = cJSON_GetObjectItemCaseSensitive(wind, "speed_kilometre");
-      if (cJSON_IsNumber(kmh)) wind_val = (float) kmh->valuedouble;
+      cJSON* kmh = cJSON_GetObjectItemCaseSensitive(wind, "speed_kilometre");
+      if (cJSON_IsNumber(kmh)) wind_val = (float)kmh->valuedouble;
     }
     if (!std::isnan(wind_val) && this->wind_kmh_)
       this->wind_kmh_->publish_state(wind_val);
@@ -425,7 +423,6 @@ void WeatherBOM::parse_and_publish_observations_(const std::string &json) {
   cJSON_Delete(root);
 #endif
 }
-
 
 // file-local helpers for forecast parsing
 static float _wb_coalesce_number(cJSON* obj, const char* k1,
@@ -481,45 +478,80 @@ void WeatherBOM::parse_and_publish_forecast_(const std::string& json) {
     auto handle_day = [&](cJSON* day, bool is_today) {
       if (!day) return;
 
+      // --- 1. Extract values into variables first ---
+
       float tmin = _wb_coalesce_number(day, "temp_min", "temperature_min");
       float tmax = _wb_coalesce_number(day, "temp_max", "temperature_max");
 
-      float chance = NAN;
-      std::string amount;
-      cJSON* rain = cJSON_GetObjectItemCaseSensitive(day, "rain");
-      if (rain && cJSON_IsObject(rain)) {
-        chance = _wb_coalesce_number(rain, "chance");
-        amount = _wb_coalesce_string(rain, "amount", "amount_text");
-      } else {
-        chance = _wb_coalesce_number(day, "chance_of_rain");
-        amount = _wb_coalesce_string(day, "rain_amount");
-      }
-
+      float rain_min = NAN;
+      float rain_max = NAN;
+      float rain_chance = NAN;
+      std::string sunrise, sunset;
       std::string summary = _wb_coalesce_string(day, "short_text", "summary");
       std::string icon = _wb_coalesce_string(day, "icon_descriptor", "icon");
+
+      // Rain values
+      cJSON* rain = cJSON_GetObjectItemCaseSensitive(day, "rain");
+      if (rain) {
+        rain_chance = _wb_coalesce_number(rain, "chance");
+
+        cJSON* amount = cJSON_GetObjectItemCaseSensitive(rain, "amount");
+        if (amount) {
+          rain_min = _wb_coalesce_number(amount, "min");
+          rain_max = _wb_coalesce_number(amount, "max");
+        }
+      }
+
+      // Sunrise/Sunset
+      cJSON* astro = cJSON_GetObjectItemCaseSensitive(day, "astronomical");
+      if (astro) {
+        sunrise = _wb_coalesce_string(astro, "sunrise_time");
+        sunset = _wb_coalesce_string(astro, "sunset_time");
+      }
+
+      // --- 2. Now publish in grouped style (consistent with your code) ---
 
       if (is_today) {
         if (!std::isnan(tmin) && this->today_min_)
           this->today_min_->publish_state(tmin);
         if (!std::isnan(tmax) && this->today_max_)
           this->today_max_->publish_state(tmax);
-        if (!std::isnan(chance) && this->today_rain_chance_)
-          this->today_rain_chance_->publish_state(chance);
-        if (!amount.empty() && this->today_rain_amount_)
-          this->today_rain_amount_->publish_state(amount);
+
+        if (!std::isnan(rain_chance) && this->today_rain_chance_)
+          this->today_rain_chance_->publish_state(rain_chance);
+        if (!std::isnan(rain_min) && this->today_rain_min_)
+          this->today_rain_min_->publish_state(rain_min);
+        if (!std::isnan(rain_max) && this->today_rain_max_)
+          this->today_rain_max_->publish_state(rain_max);
+
+        if (!sunrise.empty() && this->today_sunrise_)
+          this->today_sunrise_->publish_state(sunrise);
+        if (!sunset.empty() && this->today_sunset_)
+          this->today_sunset_->publish_state(sunset);
+
         if (!summary.empty() && this->today_summary_)
           this->today_summary_->publish_state(summary);
         if (!icon.empty() && this->today_icon_)
           this->today_icon_->publish_state(icon);
+
       } else {
         if (!std::isnan(tmin) && this->tomorrow_min_)
           this->tomorrow_min_->publish_state(tmin);
         if (!std::isnan(tmax) && this->tomorrow_max_)
           this->tomorrow_max_->publish_state(tmax);
-        if (!std::isnan(chance) && this->tomorrow_rain_chance_)
-          this->tomorrow_rain_chance_->publish_state(chance);
-        if (!amount.empty() && this->tomorrow_rain_amount_)
-          this->tomorrow_rain_amount_->publish_state(amount);
+
+        if (!std::isnan(rain_chance) && this->tomorrow_rain_chance_)
+          this->tomorrow_rain_chance_->publish_state(rain_chance);
+        if (!std::isnan(rain_min) && this->tomorrow_rain_min_)
+          this->tomorrow_rain_min_->publish_state(rain_min);
+        if (!std::isnan(rain_max) && this->tomorrow_rain_max_)
+          this->tomorrow_rain_max_->publish_state(rain_max);
+
+        if (!sunrise.empty() && this->tomorrow_sunrise_)
+          this->tomorrow_sunrise_->publish_state(sunrise);
+        if (!sunset.empty() && this->tomorrow_sunset_)
+          this->tomorrow_sunset_->publish_state(sunset);
+
         if (!summary.empty() && this->tomorrow_summary_)
           this->tomorrow_summary_->publish_state(summary);
         if (!icon.empty() && this->tomorrow_icon_)
