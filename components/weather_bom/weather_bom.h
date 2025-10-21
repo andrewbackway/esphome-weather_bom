@@ -65,6 +65,7 @@ class WeatherBOM : public PollingComponent {
   sensor::Sensor *temperature_{nullptr};
   sensor::Sensor *humidity_{nullptr};
   sensor::Sensor *wind_kmh_{nullptr};
+  sensor::Sensor *rain_since_9am_{nullptr};
 
   sensor::Sensor *today_min_{nullptr};
   sensor::Sensor *today_max_{nullptr};

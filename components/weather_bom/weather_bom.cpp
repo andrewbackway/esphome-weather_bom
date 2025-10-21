@@ -354,53 +354,59 @@ bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
 #endif
 }
 
-void WeatherBOM::parse_and_publish_observations_(const std::string& json) {
+void WeatherBOM::parse_and_publish_observations_(const std::string &json) {
 #ifndef USE_ESP_IDF
   return;
 #else
-  if (json.empty()) {
-    ESP_LOGD(TAG, "No observations JSON to parse");
-    return;
-  }
-
   ESP_LOGD(TAG, "Parsing observations JSON: %.100s...", json.c_str());
-  cJSON* root = cJSON_ParseWithLength(json.c_str(), json.size());
+
+  cJSON *root = cJSON_ParseWithLength(json.c_str(), json.size());
   if (!root) {
     ESP_LOGW(TAG, "Failed to parse observations JSON");
     return;
   }
 
-  cJSON* data = cJSON_GetObjectItemCaseSensitive(root, "data");
+  cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
   if (cJSON_IsObject(data)) {
-    cJSON* temp = cJSON_GetObjectItemCaseSensitive(data, "temp");
+
+    // ✅ Temperature
+    cJSON *temp = cJSON_GetObjectItemCaseSensitive(data, "temp");
     if (cJSON_IsNumber(temp)) {
-      float val = (float)temp->valuedouble;
+      float val = (float) temp->valuedouble;
+      ESP_LOGD(TAG, "Temperature: %f", val);
       if (this->temperature_) this->temperature_->publish_state(val);
     }
 
-    cJSON* hum = cJSON_GetObjectItemCaseSensitive(data, "humidity");
+    // ✅ Rain since 9 AM
+    cJSON *rain = cJSON_GetObjectItemCaseSensitive(data, "rain_since_9am");
+    if (cJSON_IsNumber(rain)) {
+      float val = (float) rain->valuedouble;
+      ESP_LOGD(TAG, "Rain since 9AM: %f", val);
+      if (this->rain_since_9am_) this->rain_since_9am_->publish_state(val);
+    }
+
+    // ✅ Humidity
+    cJSON *hum = cJSON_GetObjectItemCaseSensitive(data, "humidity");
     if (cJSON_IsNumber(hum)) {
-      float val = (float)hum->valuedouble;
+      float val = (float) hum->valuedouble;
       if (this->humidity_) this->humidity_->publish_state(val);
     }
 
+    // ✅ Wind data
     float wind_val = NAN;
-    cJSON* wind = cJSON_GetObjectItemCaseSensitive(data, "wind");
-    if (cJSON_IsNumber(wind)) {
-      wind_val = (float)wind->valuedouble;
-    } else if (cJSON_IsObject(wind)) {
-      cJSON* kmh = cJSON_GetObjectItemCaseSensitive(wind, "speed_kilometre");
-      if (cJSON_IsNumber(kmh)) wind_val = (float)kmh->valuedouble;
+    cJSON *wind = cJSON_GetObjectItemCaseSensitive(data, "wind");
+    if (cJSON_IsObject(wind)) {
+      cJSON *kmh = cJSON_GetObjectItemCaseSensitive(wind, "speed_kilometre");
+      if (cJSON_IsNumber(kmh)) wind_val = (float) kmh->valuedouble;
     }
     if (!std::isnan(wind_val) && this->wind_kmh_)
       this->wind_kmh_->publish_state(wind_val);
-  } else {
-    ESP_LOGW(TAG, "No 'data' object in observations");
   }
 
   cJSON_Delete(root);
 #endif
 }
+
 
 // file-local helpers for forecast parsing
 static float _wb_coalesce_number(cJSON* obj, const char* k1,
