@@ -161,45 +161,47 @@ void WeatherBOM::do_fetch() {
         "/warnings";
   success_warn = this->fetch_url_(url, this->warn_body_);
 
-  // Process back on main thread
-  App.scheduler.set_timeout(this, "bom_process", 0,
-                            [this, success_obs, success_fc, success_warn]() {
-                              this->process_data();
-
-                              if (success_obs || success_fc || success_warn) {
-                                this->publish_last_update_();
-                              } else {
-                                ESP_LOGW(TAG, "No successful fetches.");
-                              }
-
-                              this->running_ = false;
-                            });
+  // Launch a new FreeRTOS task for processing (to avoid blocking main loop)
+  xTaskCreatePinnedToCore(&WeatherBOM::process_task,  // Task function
+                          "bom_process",              // Name
+                          8192,                       // Stack size
+                          this,                       // Parameter
+                          5,                          // Priority
+                          nullptr,        // Task handle (not needed)
+                          tskNO_AFFINITY  // Any core
+  );
 #endif
 }
 
+void WeatherBOM::process_task(void *pv) {
+  auto *self = static_cast<WeatherBOM *>(pv);
+
+  // Parse and publish data (runs off main loop)
+  self->process_data();
+
+  // Only publish timestamp if any success
+  self->publish_last_update_();
+
+  // Cleanup memory
+  self->obs_body_.clear();
+  self->fc_body_.clear();
+  self->warn_body_.clear();
+
+  // Mark as finished
+  self->running_ = false;
+
+  // Kill this task
+  vTaskDelete(nullptr);
+}
+
 void WeatherBOM::process_data() {
-  App.scheduler.set_timeout(this, "obs", 0, [this]() {
-    this->parse_and_publish_observations_(this->obs_body_);
-
-    App.scheduler.set_timeout(this, "forecast", 0, [this]() {
-      this->parse_and_publish_forecast_(this->fc_body_);
-
-      App.scheduler.set_timeout(this, "warn", 0, [this]() {
-        this->parse_and_publish_warnings_(this->warn_body_);
-
-        // Publish final timestamp only after at least one success
-        this->publish_last_update_();
-
-        // ✅ Clear buffers to free RAM
-        this->obs_body_.clear();
-        this->fc_body_.clear();
-        this->warn_body_.clear();
-
-        // ✅ Mark task done
-        this->running_ = false;
-      });
-    });
-  });
+  this->parse_and_publish_observations_(this->obs_body_);
+  this->parse_and_publish_forecast_(this->fc_body_);
+  this->parse_and_publish_warnings_(this->warn_body_);
+  // Free memory
+  this->obs_body_.clear();
+  this->fc_body_.clear();
+  this->warn_body_.clear();
 }
 
 bool WeatherBOM::resolve_geohash_if_needed_() {

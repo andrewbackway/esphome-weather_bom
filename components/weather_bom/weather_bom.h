@@ -48,6 +48,7 @@ class WeatherBOM : public PollingComponent {
   void update() override;
   void dump_config() override;
 
+  static void process_task(void *pv);
  protected:
   bool initial_fetch_done_ = false;
 
