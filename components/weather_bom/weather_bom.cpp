@@ -44,14 +44,12 @@ void WeatherBOM::dump_config() {
   LOG_SENSOR("  ", "Today Min", this->today_min_);
   LOG_SENSOR("  ", "Today Max", this->today_max_);
   LOG_SENSOR("  ", "Today Rain Chance", this->today_rain_chance_);
-  LOG_TEXT_SENSOR("  ", "Today Rain Amount", this->today_rain_amount_);
   LOG_TEXT_SENSOR("  ", "Today Summary", this->today_summary_);
   LOG_TEXT_SENSOR("  ", "Today Icon", this->today_icon_);
 
   LOG_SENSOR("  ", "Tomorrow Min", this->tomorrow_min_);
   LOG_SENSOR("  ", "Tomorrow Max", this->tomorrow_max_);
   LOG_SENSOR("  ", "Tomorrow Rain Chance", this->tomorrow_rain_chance_);
-  LOG_TEXT_SENSOR("  ", "Tomorrow Rain Amount", this->tomorrow_rain_amount_);
   LOG_TEXT_SENSOR("  ", "Tomorrow Summary", this->tomorrow_summary_);
   LOG_TEXT_SENSOR("  ", "Tomorrow Icon", this->tomorrow_icon_);
 
