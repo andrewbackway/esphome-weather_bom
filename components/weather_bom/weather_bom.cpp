@@ -248,28 +248,47 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
     return false;
   }
 
-  bool ok = false;
-  cJSON* data = cJSON_GetObjectItemCaseSensitive(root, "data");
-  if (data && cJSON_IsArray(data) && cJSON_GetArraySize(data) > 0) {
-    cJSON* first = cJSON_GetArrayItem(data, 0);
-    cJSON* gh = cJSON_GetObjectItemCaseSensitive(first, "geohash");
-    cJSON* nm = cJSON_GetObjectItemCaseSensitive(first, "name");
-    if (cJSON_IsString(gh) && gh->valuestring != nullptr) {
-      this->geohash_ = gh->valuestring;
-      ok = true;
-      ESP_LOGD(TAG, "Resolved geohash: %s", this->geohash_.c_str());
-      if (this->out_geohash_) this->out_geohash_->publish_state(this->geohash_);
+bool ok = false;
+cJSON* data = cJSON_GetObjectItemCaseSensitive(root, "data");
+if (data && cJSON_IsArray(data) && cJSON_GetArraySize(data) > 0) {
+  cJSON* first = cJSON_GetArrayItem(data, 0);
+  cJSON* gh = cJSON_GetObjectItemCaseSensitive(first, "geohash");
+  cJSON* nm = cJSON_GetObjectItemCaseSensitive(first, "name");
+
+  if (cJSON_IsString(gh) && gh->valuestring != nullptr) {
+    std::string full_geohash = gh->valuestring;
+
+    // ✅ Truncate to first 6 chars for BOM compatibility
+    if (full_geohash.length() > 6) {
+      ESP_LOGW(TAG,
+               "Geohash '%s' too long (%d). Truncating to '%s' for BOM API.",
+               full_geohash.c_str(),
+               full_geohash.length(),
+               full_geohash.substr(0, 6).c_str());
+      this->geohash_ = full_geohash.substr(0, 6);
     } else {
-      ESP_LOGW(TAG, "No geohash in response");
+      this->geohash_ = full_geohash;
     }
-    if (cJSON_IsString(nm) && nm->valuestring != nullptr &&
-        this->location_name_) {
-      this->location_name_->publish_state(nm->valuestring);
-      ESP_LOGD(TAG, "Published location name: %s", nm->valuestring);
+
+    ok = true;
+    ESP_LOGD(TAG, "Using geohash: %s", this->geohash_.c_str());
+
+    if (this->out_geohash_) {
+      this->out_geohash_->publish_state(this->geohash_);
     }
   } else {
-    ESP_LOGW(TAG, "No data array or empty in geohash response");
+    ESP_LOGW(TAG, "No geohash in response");
   }
+
+  // ✅ Publish location name only if available
+  if (cJSON_IsString(nm) && nm->valuestring && this->location_name_) {
+    this->location_name_->publish_state(nm->valuestring);
+    ESP_LOGD(TAG, "Location name: %s", nm->valuestring);
+  }
+
+} else {
+  ESP_LOGW(TAG, "No 'data' array or response was empty");
+}
 
   cJSON_Delete(root);
 
@@ -369,7 +388,7 @@ void WeatherBOM::parse_and_publish_observations_(const std::string &json) {
   cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
   if (cJSON_IsObject(data)) {
 
-    // ✅ Temperature
+    // Temperature
     cJSON *temp = cJSON_GetObjectItemCaseSensitive(data, "temp");
     if (cJSON_IsNumber(temp)) {
       float val = (float) temp->valuedouble;
@@ -377,7 +396,7 @@ void WeatherBOM::parse_and_publish_observations_(const std::string &json) {
       if (this->temperature_) this->temperature_->publish_state(val);
     }
 
-    // ✅ Rain since 9 AM
+    // Rain since 9 AM
     cJSON *rain = cJSON_GetObjectItemCaseSensitive(data, "rain_since_9am");
     if (cJSON_IsNumber(rain)) {
       float val = (float) rain->valuedouble;
@@ -385,14 +404,14 @@ void WeatherBOM::parse_and_publish_observations_(const std::string &json) {
       if (this->rain_since_9am_) this->rain_since_9am_->publish_state(val);
     }
 
-    // ✅ Humidity
+    //  Humidity
     cJSON *hum = cJSON_GetObjectItemCaseSensitive(data, "humidity");
     if (cJSON_IsNumber(hum)) {
       float val = (float) hum->valuedouble;
       if (this->humidity_) this->humidity_->publish_state(val);
     }
 
-    // ✅ Wind data
+    // Wind data
     float wind_val = NAN;
     cJSON *wind = cJSON_GetObjectItemCaseSensitive(data, "wind");
     if (cJSON_IsObject(wind)) {
