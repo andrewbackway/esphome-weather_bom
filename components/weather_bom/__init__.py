@@ -1,6 +1,5 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.const import ICON_ALERT, ICON_THERMOMETER
 from esphome.components import sensor, text_sensor
 
 AUTO_LOAD = ["sensor", "text_sensor"]
@@ -8,6 +7,9 @@ CODEOWNERS = ["@andrew-b"]
 
 ns = cg.esphome_ns.namespace("weather_bom")
 WeatherBOM = ns.class_("WeatherBOM", cg.PollingComponent)
+
+ICON_ALERT = "mdi:alert"
+ICON_THERMOMETER = "mdi:thermometer"
 
 # Inputs
 CONF_GEOHASH = "geohash"
