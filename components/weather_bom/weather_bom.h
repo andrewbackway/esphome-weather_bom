@@ -54,7 +54,9 @@ class WeatherBOM : public PollingComponent {
   sensor::Sensor *lat_sensor_{nullptr};
   sensor::Sensor *lon_sensor_{nullptr};
   float dynamic_lat_{NAN}, dynamic_lon_{NAN};
+  float last_lat_{NAN}, last_lon_{NAN};
   bool have_dynamic_{false};
+  bool running_{false};
 
   sensor::Sensor *temperature_{nullptr};
   sensor::Sensor *humidity_{nullptr};
@@ -79,12 +81,19 @@ class WeatherBOM : public PollingComponent {
   text_sensor::TextSensor *out_geohash_{nullptr};
   text_sensor::TextSensor *last_update_{nullptr};
 
+  std::string obs_body_;
+  std::string fc_body_;
+  std::string warn_body_;
+
   bool resolve_geohash_if_needed_();
   bool fetch_url_(const std::string &url, std::string &out);
   void parse_and_publish_observations_(const std::string &json);
   void parse_and_publish_forecast_(const std::string &json);
   void parse_and_publish_warnings_(const std::string &json);
   void publish_last_update_();
+  void do_fetch();
+  void process_data();
+  static void fetch_task(void *pvParameters);
 };
 
 }  // namespace weather_bom
