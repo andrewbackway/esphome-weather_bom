@@ -1,6 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor, text_sensor
+from esphome.const import CONF_LATITUDE, CONF_LONGITUDE
 
 AUTO_LOAD = ["sensor", "text_sensor"]
 CODEOWNERS = ["@andrew-b"]
@@ -10,11 +11,14 @@ WeatherBOM = ns.class_("WeatherBOM", cg.PollingComponent)
 
 ICON_ALERT = "mdi:alert"
 ICON_THERMOMETER = "mdi:thermometer"
+ICON_RAIN_CHANCE = "mdi:umbrella-percent"
+ICON_RAIN_AMOUNT = "mdi:weather-rainy"
+ICON_WINDY = "mdi:weather-windy"
+ICON_HUMIDITY = "mdi:water-percent"
+ICON_CLOCK = "mdi:clock-outline"
 
 # Inputs
 CONF_GEOHASH = "geohash"
-CONF_LATITUDE = "latitude"
-CONF_LONGITUDE = "longitude"
 CONF_LAT_SENSOR = "latitude_sensor"
 CONF_LON_SENSOR = "longitude_sensor"
 
@@ -50,9 +54,21 @@ def _validate_location(cfg):
     gh = cfg.get(CONF_GEOHASH)
     lat, lon = cfg.get(CONF_LATITUDE), cfg.get(CONF_LONGITUDE)
     lats, lons = cfg.get(CONF_LAT_SENSOR), cfg.get(CONF_LON_SENSOR)
-    if not any([gh, (lat is not None and lon is not None), (lats and lons)]):
+
+    loc_methods = [
+        bool(gh),
+        (lat is not None and lon is not None),
+        bool(lats and lons)
+    ]
+    provided_count = sum(loc_methods)
+
+    if provided_count == 0:
         raise cv.Invalid(
-            "Provide geohash OR latitude+longitude OR latitude_sensor+longitude_sensor"
+            "Provide exactly one location method: geohash OR latitude+longitude OR latitude_sensor+longitude_sensor"
+        )
+    if provided_count > 1:
+        raise cv.Invalid(
+            "Provide exactly one location method: geohash OR latitude+longitude OR latitude_sensor+longitude_sensor"
         )
     return cfg
 
@@ -62,8 +78,8 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): cv.declare_id(WeatherBOM),
             cv.Optional(CONF_GEOHASH): cv.string,
-            cv.Optional(CONF_LATITUDE): cv.float_,
-            cv.Optional(CONF_LONGITUDE): cv.float_,
+            cv.Optional(CONF_LATITUDE): cv.latitude,
+            cv.Optional(CONF_LONGITUDE): cv.longitude,
             cv.Optional(CONF_LAT_SENSOR): cv.use_id(sensor.Sensor),
             cv.Optional(CONF_LON_SENSOR): cv.use_id(sensor.Sensor),
 
@@ -75,40 +91,56 @@ CONFIG_SCHEMA = cv.All(
             ),
             cv.Optional(CONF_HUMIDITY): sensor.sensor_schema(
                 unit_of_measurement="%",
-                icon="mdi:water-percent",
+                icon=ICON_HUMIDITY,
                 accuracy_decimals=0,
             ),
             cv.Optional(CONF_WIND_KMH): sensor.sensor_schema(
                 unit_of_measurement="km/h",
-                icon="mdi:weather-windy",
+                icon=ICON_WINDY,
                 accuracy_decimals=0,
             ),
 
             # Today
             cv.Optional(CONF_TODAY_MIN): sensor.sensor_schema(
-                unit_of_measurement="°C", accuracy_decimals=1
+                unit_of_measurement="°C",
+                icon=ICON_THERMOMETER,
+                accuracy_decimals=1
             ),
             cv.Optional(CONF_TODAY_MAX): sensor.sensor_schema(
-                unit_of_measurement="°C", accuracy_decimals=1
+                unit_of_measurement="°C",
+                icon=ICON_THERMOMETER,
+                accuracy_decimals=1
             ),
             cv.Optional(CONF_TODAY_RAIN_CHANCE): sensor.sensor_schema(
-                unit_of_measurement="%", accuracy_decimals=0
+                unit_of_measurement="%",
+                icon=ICON_RAIN_CHANCE,
+                accuracy_decimals=0
             ),
-            cv.Optional(CONF_TODAY_RAIN_AMOUNT): text_sensor.text_sensor_schema(),
+            cv.Optional(CONF_TODAY_RAIN_AMOUNT): text_sensor.text_sensor_schema(
+                icon=ICON_RAIN_AMOUNT
+            ),
             cv.Optional(CONF_TODAY_SUMMARY): text_sensor.text_sensor_schema(),
             cv.Optional(CONF_TODAY_ICON): text_sensor.text_sensor_schema(),
 
             # Tomorrow
             cv.Optional(CONF_TOMORROW_MIN): sensor.sensor_schema(
-                unit_of_measurement="°C", accuracy_decimals=1
+                unit_of_measurement="°C",
+                icon=ICON_THERMOMETER,
+                accuracy_decimals=1
             ),
             cv.Optional(CONF_TOMORROW_MAX): sensor.sensor_schema(
-                unit_of_measurement="°C", accuracy_decimals=1
+                unit_of_measurement="°C",
+                icon=ICON_THERMOMETER,
+                accuracy_decimals=1
             ),
             cv.Optional(CONF_TOMORROW_RAIN_CHANCE): sensor.sensor_schema(
-                unit_of_measurement="%", accuracy_decimals=0
+                unit_of_measurement="%",
+                icon=ICON_RAIN_CHANCE,
+                accuracy_decimals=0
             ),
-            cv.Optional(CONF_TOMORROW_RAIN_AMOUNT): text_sensor.text_sensor_schema(),
+            cv.Optional(CONF_TOMORROW_RAIN_AMOUNT): text_sensor.text_sensor_schema(
+                icon=ICON_RAIN_AMOUNT
+            ),
             cv.Optional(CONF_TOMORROW_SUMMARY): text_sensor.text_sensor_schema(),
             cv.Optional(CONF_TOMORROW_ICON): text_sensor.text_sensor_schema(),
 
@@ -119,7 +151,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_LOCATION_NAME): text_sensor.text_sensor_schema(),
             cv.Optional(CONF_OUT_GEOHASH): text_sensor.text_sensor_schema(),
             cv.Optional(CONF_LAST_UPDATE): text_sensor.text_sensor_schema(
-                icon="mdi:clock-outline"
+                icon=ICON_CLOCK
             ),
         }
     ).extend(cv.polling_component_schema("300s")),
@@ -128,7 +160,7 @@ CONFIG_SCHEMA = cv.All(
 
 
 async def to_code(config):
-    var = cg.new_Pvariable(config[CONF_ID])
+    var = cg.new_Pvariable(config[cg.CONF_ID])
     await cg.register_component(var, config)
 
     if CONF_GEOHASH in config:
@@ -138,10 +170,10 @@ async def to_code(config):
     if CONF_LONGITUDE in config:
         cg.add(var.set_static_lon(config[CONF_LONGITUDE]))
     if CONF_LAT_SENSOR in config:
-        lat_s = await sensor.new_sensor(config[CONF_LAT_SENSOR])
+        lat_s = await cg.get_variable(config[CONF_LAT_SENSOR])
         cg.add(var.set_lat_sensor(lat_s))
     if CONF_LON_SENSOR in config:
-        lon_s = await sensor.new_sensor(config[CONF_LON_SENSOR])
+        lon_s = await cg.get_variable(config[CONF_LON_SENSOR])
         cg.add(var.set_lon_sensor(lon_s))
 
     async def _reg(name, fn):
