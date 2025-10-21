@@ -201,16 +201,15 @@ void WeatherBOM::do_fetch() {
   }
 
   // Schedule processing on main thread
-  App.scheduler.set_timeout(0, 
-      [this, success_obs, success_fc, success_warn]() {
-        this->process_data();
-        if (success_obs || success_fc || success_warn) {
-          this->publish_last_update_();
-        } else {
-          ESP_LOGW(TAG, "No successful fetches, skipping last_update");
-        }
-        this->running_ = false;
-      });
+  App.scheduler.set_timeout(0, [this, success_obs, success_fc, success_warn]() {
+    this->process_data();
+    if (success_obs || success_fc || success_warn) {
+      this->publish_last_update_();
+    } else {
+      ESP_LOGW(TAG, "No successful fetches, skipping last_update");
+    }
+    this->running_ = false;
+  });
 #endif
 }
 
