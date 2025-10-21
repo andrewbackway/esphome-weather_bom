@@ -90,12 +90,18 @@ void WeatherBOM::setup() {
   if (!this->geohash_.empty() && this->out_geohash_) {
     this->out_geohash_->publish_state(this->geohash_);
   }
-
-  // If Wi-Fi is already up, trigger an update
-  if (wifi::global_wifi_component != nullptr && wifi::global_wifi_component->is_connected()) {
-    this->update();
-  }
 #endif
+}
+
+void WeatherBOM::loop() {
+  // Only run once after boot
+  if (!this->initial_fetch_done_) {
+    if (wifi::global_wifi_component != nullptr && wifi::global_wifi_component->is_connected()) {
+      ESP_LOGD(TAG, "WiFi connected after boot — fetching weather now");
+      this->initial_fetch_done_ = true;
+      this->update();  
+    }
+  }
 }
 
 void WeatherBOM::update() {

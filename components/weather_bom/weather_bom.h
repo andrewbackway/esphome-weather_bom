@@ -48,6 +48,8 @@ class WeatherBOM : public PollingComponent {
   void dump_config() override;
 
  protected:
+  bool initial_fetch_done_ = false;
+
   std::string geohash_;
   bool have_static_lat_{false}, have_static_lon_{false};
   float static_lat_{0}, static_lon_{0};
