@@ -1,0 +1,50 @@
+external_components:
+  - source: /config/external_components
+    components: [weather_bom]
+
+weather_bom:
+  latitude_sensor: gps_lat
+  longitude_sensor: gps_lon
+  update_interval: 300s
+
+  temperature:
+    name: "BOM Temperature"
+  humidity:
+    name: "BOM Humidity"
+  wind_speed_kmh:
+    name: "BOM Wind"
+
+  today_min:
+    name: "Today Min"
+  today_max:
+    name: "Today Max"
+  today_rain_chance:
+    name: "Today Rain Chance"
+  today_rain_amount:
+    name: "Today Rain Amount"
+  today_summary:
+    name: "Today Summary"
+  today_icon:
+    name: "Today Icon"
+
+  tomorrow_min:
+    name: "Tomorrow Min"
+  tomorrow_max:
+    name: "Tomorrow Max"
+  tomorrow_rain_chance:
+    name: "Tomorrow Rain Chance"
+  tomorrow_rain_amount:
+    name: "Tomorrow Rain Amount"
+  tomorrow_summary:
+    name: "Tomorrow Summary"
+  tomorrow_icon:
+    name: "Tomorrow Icon"
+
+  warnings_json:
+    name: "Warnings JSON"
+  location_name:
+    name: "Location Name"
+  out_geohash:
+    name: "Resolved Geohash"
+  last_update:
+    name: "Last Update"
