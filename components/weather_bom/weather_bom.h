@@ -45,6 +45,7 @@ class WeatherBOM : public PollingComponent {
 
   void setup() override;
   void update() override;
+  void dump_config() override;
 
  protected:
   std::string geohash_;

@@ -15,12 +15,51 @@ namespace weather_bom {
 
 static const char *const TAG = "weather_bom";
 
+void WeatherBOM::dump_config() {
+  ESP_LOGCONFIG(TAG, "Weather BOM:");
+  LOG_UPDATE_INTERVAL(this);
+  if (!this->geohash_.empty()) {
+    ESP_LOGCONFIG(TAG, "  Geohash: %s", this->geohash_.c_str());
+  } else if (this->have_static_lat_ && this->have_static_lon_) {
+    ESP_LOGCONFIG(TAG, "  Static Latitude: %.6f", this->static_lat_);
+    ESP_LOGCONFIG(TAG, "  Static Longitude: %.6f", this->static_lon_);
+  } else if (this->lat_sensor_ != nullptr && this->lon_sensor_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  Latitude Sensor: yes");
+    ESP_LOGCONFIG(TAG, "  Longitude Sensor: yes");
+  } else {
+    ESP_LOGCONFIG(TAG, "  No location configured");
+  }
+
+  LOG_SENSOR("  ", "Temperature", this->temperature_);
+  LOG_SENSOR("  ", "Humidity", this->humidity_);
+  LOG_SENSOR("  ", "Wind Speed KMH", this->wind_kmh_);
+
+  LOG_SENSOR("  ", "Today Min", this->today_min_);
+  LOG_SENSOR("  ", "Today Max", this->today_max_);
+  LOG_SENSOR("  ", "Today Rain Chance", this->today_rain_chance_);
+  LOG_TEXT_SENSOR("  ", "Today Rain Amount", this->today_rain_amount_);
+  LOG_TEXT_SENSOR("  ", "Today Summary", this->today_summary_);
+  LOG_TEXT_SENSOR("  ", "Today Icon", this->today_icon_);
+
+  LOG_SENSOR("  ", "Tomorrow Min", this->tomorrow_min_);
+  LOG_SENSOR("  ", "Tomorrow Max", this->tomorrow_max_);
+  LOG_SENSOR("  ", "Tomorrow Rain Chance", this->tomorrow_rain_chance_);
+  LOG_TEXT_SENSOR("  ", "Tomorrow Rain Amount", this->tomorrow_rain_amount_);
+  LOG_TEXT_SENSOR("  ", "Tomorrow Summary", this->tomorrow_summary_);
+  LOG_TEXT_SENSOR("  ", "Tomorrow Icon", this->tomorrow_icon_);
+
+  LOG_TEXT_SENSOR("  ", "Warnings JSON", this->warnings_json_);
+  LOG_TEXT_SENSOR("  ", "Location Name", this->location_name_);
+  LOG_TEXT_SENSOR("  ", "Out Geohash", this->out_geohash_);
+  LOG_TEXT_SENSOR("  ", "Last Update", this->last_update_);
+}
+
 void WeatherBOM::setup() {
 #ifndef USE_ESP_IDF
   ESP_LOGE(TAG, "This component requires ESP-IDF framework.");
   return;
 #else
-  ESP_LOGI(TAG, "Initialising WeatherBOM component");
+  ESP_LOGD(TAG, "Setting up WeatherBOM component");
 
   // Subscribe to lat/lon sensors
   if (this->lat_sensor_ != nullptr) {
@@ -29,6 +68,10 @@ void WeatherBOM::setup() {
       this->dynamic_lat_ = v;
       this->have_dynamic_ = !std::isnan(v) && !std::isnan(this->dynamic_lon_);
       ESP_LOGD(TAG, "Updated have_dynamic: %d", this->have_dynamic_);
+      if (this->have_dynamic_ && this->geohash_.empty()) {
+        ESP_LOGD(TAG, "First valid lat/lon received, triggering update");
+        this->update();
+      }
     });
   }
   if (this->lon_sensor_ != nullptr) {
@@ -37,12 +80,22 @@ void WeatherBOM::setup() {
       this->dynamic_lon_ = v;
       this->have_dynamic_ = !std::isnan(this->dynamic_lat_) && !std::isnan(v);
       ESP_LOGD(TAG, "Updated have_dynamic: %d", this->have_dynamic_);
+      if (this->have_dynamic_ && this->geohash_.empty()) {
+        ESP_LOGD(TAG, "First valid lat/lon received, triggering update");
+        this->update();
+      }
     });
   }
 
   if (!this->geohash_.empty() && this->out_geohash_ != nullptr) {
     this->out_geohash_->publish_state(this->geohash_);
     ESP_LOGD(TAG, "Published initial geohash: %s", this->geohash_.c_str());
+  }
+
+  // Trigger initial update if geohash or static lat/lon are provided
+  if (!this->geohash_.empty() || (this->have_static_lat_ && this->have_static_lon_)) {
+    ESP_LOGD(TAG, "Geohash or static location provided, triggering initial update");
+    this->update();
   }
 #endif
 }
