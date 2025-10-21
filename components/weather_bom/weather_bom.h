@@ -39,10 +39,10 @@ class WeatherBOM : public PollingComponent {
     today_summary_ = t;
   }
   void set_today_icon_text(text_sensor::TextSensor* t) { today_icon_ = t; }
-  void set_today_sunrise_sensor_text(text_sensor::TextSensor* s) {
+  void set_today_sunrise_text(text_sensor::TextSensor* s) {
     today_sunrise_ = s;
   }
-  void set_today_sunset_sensor_text(text_sensor::TextSensor* s) {
+  void set_today_sunset_text(text_sensor::TextSensor* s) {
     today_sunset_ = s;
   }
 
@@ -68,10 +68,10 @@ class WeatherBOM : public PollingComponent {
   void set_tomorrow_rain_max_sensor(sensor::Sensor* s) {
     tomorrow_rain_max_ = s;
   }
-  void set_tomorrow_sunrise_sensor_text(text_sensor::TextSensor* s) {
+  void set_tomorrow_sunrise_text(text_sensor::TextSensor* s) {
     tomorrow_sunrise_ = s;
   }
-  void set_tomorrow_sunset_sensor_text(text_sensor::TextSensor* s) {
+  void set_tomorrow_sunset_text(text_sensor::TextSensor* s) {
     tomorrow_sunset_ = s;
   }
 
