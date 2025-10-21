@@ -96,12 +96,6 @@ void WeatherBOM::setup() {
     ESP_LOGD(TAG, "Published initial geohash: %s", this->geohash_.c_str());
   }
 
-  // Register WiFi connect callback
-  wifi::global_wifi_component->add_on_connect_callback([this]() {
-    ESP_LOGD(TAG, "WiFi connected, triggering update");
-    this->update();
-  });
-
   // Trigger initial update if already connected
   if (wifi::global_wifi_component->is_connected()) {
     ESP_LOGD(TAG, "WiFi already connected during setup, triggering initial update");
