@@ -28,6 +28,7 @@ CONF_LON_SENSOR = "longitude_sensor"
 CONF_TEMPERATURE = "temperature"
 CONF_HUMIDITY = "humidity"
 CONF_WIND_KMH = "wind_speed_kmh"
+CONF_RAIN_SINCE_9AM = "rain_since_9am"
 
 # Forecast Today
 CONF_TODAY_MIN = "today_min"
@@ -108,6 +109,11 @@ CONFIG_SCHEMA = cv.All(
                 unit_of_measurement="km/h",
                 icon=ICON_WINDY,
                 accuracy_decimals=0,
+            ),
+            cv.Optional(CONF_RAIN_SINCE_9AM): sensor.sensor_schema(
+                unit_of_measurement="mm",
+                icon=ICON_RAIN_AMOUNT,
+                accuracy_decimals=1,
             ),
 
             # Today
@@ -200,6 +206,7 @@ async def to_code(config):
     await _reg(CONF_TEMPERATURE, "set_temperature_sensor")
     await _reg(CONF_HUMIDITY, "set_humidity_sensor")
     await _reg(CONF_WIND_KMH, "set_wind_kmh_sensor")
+    await _reg(CONF_RAIN_SINCE_9AM, "set_rain_since_9am_sensor")
 
     # Today
     await _reg(CONF_TODAY_MIN, "set_today_min_sensor")

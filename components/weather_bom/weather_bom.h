@@ -20,6 +20,7 @@ class WeatherBOM : public PollingComponent {
   void set_temperature_sensor(sensor::Sensor *s) { temperature_ = s; }
   void set_humidity_sensor(sensor::Sensor *s) { humidity_ = s; }
   void set_wind_kmh_sensor(sensor::Sensor *s) { wind_kmh_ = s; }
+  void set_rain_since_9am_sensor(sensor::Sensor *s) { rain_since_9am_ = s; }
 
   // Forecast today
   void set_today_min_sensor(sensor::Sensor *s) { today_min_ = s; }
