@@ -1,7 +1,8 @@
 #include "weather_bom.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
-#include "esphome/components/wifi/wifi_component.h"
+// OLD: #include "esphome/components/wifi/wifi_component.h"
+#include "esphome/components/network/network_component.h"
 
 #ifdef USE_ESP_IDF
 #include "esp_http_client.h"
@@ -96,10 +97,19 @@ void WeatherBOM::setup() {
     ESP_LOGD(TAG, "Published initial geohash: %s", this->geohash_.c_str());
   }
 
-  // Trigger initial update if already connected
-  if (wifi::global_wifi_component->is_connected()) {
-    ESP_LOGD(TAG, "WiFi already connected during setup, triggering initial update");
+  // Trigger initial update if already connected (via Network component)
+  if (network::global_network_component != nullptr &&
+      network::global_network_component->is_connected()) {
+    ESP_LOGD(TAG, "Network already connected during setup, triggering initial update");
     this->update();
+  }
+
+  // Also update when the network comes up later (replaces old WiFi on_connect callback)
+  if (network::global_network_component != nullptr) {
+    network::global_network_component->add_on_connect_callback([this]() {
+      ESP_LOGD(TAG, "Network connected callback, triggering update");
+      this->update();
+    });
   }
 #endif
 }
@@ -108,8 +118,11 @@ void WeatherBOM::update() {
 #ifndef USE_ESP_IDF
   return;
 #else
-  ESP_LOGD(TAG, "Starting update. Current geohash: '%s', have_static_lat: %d, have_static_lon: %d, have_dynamic: %d, dynamic_lat: %f, dynamic_lon: %f",
-           this->geohash_.c_str(), this->have_static_lat_, this->have_static_lon_, this->have_dynamic_, this->dynamic_lat_, this->dynamic_lon_);
+  ESP_LOGD(TAG,
+           "Starting update. Current geohash: '%s', have_static_lat: %d, have_static_lon: %d, "
+           "have_dynamic: %d, dynamic_lat: %f, dynamic_lon: %f",
+           this->geohash_.c_str(), this->have_static_lat_, this->have_static_lon_,
+           this->have_dynamic_, this->dynamic_lat_, this->dynamic_lon_);
 
   if (this->running_) {
     ESP_LOGD(TAG, "Fetch task already running, skipping");
@@ -120,19 +133,19 @@ void WeatherBOM::update() {
   if (this->lat_sensor_ != nullptr && this->lon_sensor_ != nullptr && this->have_dynamic_) {
     if (this->dynamic_lat_ != this->last_lat_ || this->dynamic_lon_ != this->last_lon_) {
       ESP_LOGD(TAG, "GPS coordinates changed, resetting geohash for re-resolution");
-      this->geohash_ = "";
+      this->geohash_.clear();
     }
   }
 
   this->running_ = true;
-  xTaskCreate(fetch_task, "bom_fetch", 8192, this, 5, NULL);
+  xTaskCreate(fetch_task, "bom_fetch", 8192, this, 5, nullptr);
 #endif
 }
 
 void WeatherBOM::fetch_task(void *pvParameters) {
   WeatherBOM *self = static_cast<WeatherBOM *>(pvParameters);
   self->do_fetch();
-  vTaskDelete(NULL);
+  vTaskDelete(nullptr);
 }
 
 void WeatherBOM::do_fetch() {
@@ -144,6 +157,7 @@ void WeatherBOM::do_fetch() {
   if (this->geohash_.empty()) {
     if (!this->resolve_geohash_if_needed_()) {
       ESP_LOGW(TAG, "No valid geohash yet (need lat/lon).");
+      // Ensure we allow future attempts
       App.scheduler.schedule_lambda([this]() { this->running_ = false; });
       return;
     }
@@ -157,7 +171,7 @@ void WeatherBOM::do_fetch() {
     std::string url = "https://api.weather.bom.gov.au/v1/locations/" + this->geohash_ + "/observations";
     ESP_LOGD(TAG, "Fetching observations from: %s", url.c_str());
     if (this->fetch_url_(url, this->obs_body_)) {
-      ESP_LOGD(TAG, "Fetched %d bytes for observations", this->obs_body_.size());
+      ESP_LOGD(TAG, "Fetched %d bytes for observations", (int) this->obs_body_.size());
       success_obs = true;
     } else {
       ESP_LOGW(TAG, "Failed to fetch observations");
@@ -169,7 +183,7 @@ void WeatherBOM::do_fetch() {
     std::string url = "https://api.weather.bom.gov.au/v1/locations/" + this->geohash_ + "/forecasts/daily";
     ESP_LOGD(TAG, "Fetching forecast from: %s", url.c_str());
     if (this->fetch_url_(url, this->fc_body_)) {
-      ESP_LOGD(TAG, "Fetched %d bytes for forecast", this->fc_body_.size());
+      ESP_LOGD(TAG, "Fetched %d bytes for forecast", (int) this->fc_body_.size());
       success_fc = true;
     } else {
       ESP_LOGW(TAG, "Failed to fetch forecast");
@@ -181,7 +195,7 @@ void WeatherBOM::do_fetch() {
     std::string url = "https://api.weather.bom.gov.au/v1/locations/" + this->geohash_ + "/warnings";
     ESP_LOGD(TAG, "Fetching warnings from: %s", url.c_str());
     if (this->fetch_url_(url, this->warn_body_)) {
-      ESP_LOGD(TAG, "Fetched %d bytes for warnings", this->warn_body_.size());
+      ESP_LOGD(TAG, "Fetched %d bytes for warnings", (int) this->warn_body_.size());
       success_warn = true;
     } else {
       ESP_LOGW(TAG, "Failed to fetch warnings");
@@ -243,7 +257,7 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
     ESP_LOGW(TAG, "Failed to fetch geohash resolution response");
     return false;
   }
-  ESP_LOGD(TAG, "Fetched %d bytes for geohash resolution: %.100s...", resp.size(), resp.c_str());
+  ESP_LOGD(TAG, "Fetched %d bytes for geohash resolution: %.100s...", (int) resp.size(), resp.c_str());
 
   cJSON *root = cJSON_ParseWithLength(resp.c_str(), resp.size());
   if (!root) {
