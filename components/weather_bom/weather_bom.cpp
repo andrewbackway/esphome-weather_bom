@@ -25,19 +25,24 @@ void WeatherBOM::setup() {
   // Subscribe to lat/lon sensors
   if (this->lat_sensor_ != nullptr) {
     this->lat_sensor_->add_on_state_callback([this](float v) {
+      ESP_LOGD(TAG, "Received latitude from sensor: %f", v);
       this->dynamic_lat_ = v;
       this->have_dynamic_ = !std::isnan(v) && !std::isnan(this->dynamic_lon_);
+      ESP_LOGD(TAG, "Updated have_dynamic: %d", this->have_dynamic_);
     });
   }
   if (this->lon_sensor_ != nullptr) {
     this->lon_sensor_->add_on_state_callback([this](float v) {
+      ESP_LOGD(TAG, "Received longitude from sensor: %f", v);
       this->dynamic_lon_ = v;
       this->have_dynamic_ = !std::isnan(this->dynamic_lat_) && !std::isnan(v);
+      ESP_LOGD(TAG, "Updated have_dynamic: %d", this->have_dynamic_);
     });
   }
 
   if (!this->geohash_.empty() && this->out_geohash_ != nullptr) {
     this->out_geohash_->publish_state(this->geohash_);
+    ESP_LOGD(TAG, "Published initial geohash: %s", this->geohash_.c_str());
   }
 #endif
 }
@@ -46,11 +51,15 @@ void WeatherBOM::update() {
 #ifndef USE_ESP_IDF
   return;
 #else
+  ESP_LOGD(TAG, "Starting update. Current geohash: '%s', have_static_lat: %d, have_static_lon: %d, have_dynamic: %d, dynamic_lat: %f, dynamic_lon: %f",
+           this->geohash_.c_str(), this->have_static_lat_, this->have_static_lon_, this->have_dynamic_, this->dynamic_lat_, this->dynamic_lon_);
+
   if (this->geohash_.empty()) {
     if (!this->resolve_geohash_if_needed_()) {
       ESP_LOGW(TAG, "No valid geohash yet (need lat/lon).");
       return;
     }
+    ESP_LOGD(TAG, "Resolved geohash: %s", this->geohash_.c_str());
   }
 
   bool success_obs = false, success_fc = false, success_warn = false;
@@ -59,7 +68,9 @@ void WeatherBOM::update() {
   {
     std::string body;
     std::string url = "https://api.weather.bom.gov.au/v1/locations/" + this->geohash_ + "/observations";
+    ESP_LOGD(TAG, "Fetching observations from: %s", url.c_str());
     if (this->fetch_url_(url, body)) {
+      ESP_LOGD(TAG, "Fetched %d bytes for observations", body.size());
       this->parse_and_publish_observations_(body);
       success_obs = true;
     } else {
@@ -71,7 +82,9 @@ void WeatherBOM::update() {
   {
     std::string body;
     std::string url = "https://api.weather.bom.gov.au/v1/locations/" + this->geohash_ + "/forecasts/daily";
+    ESP_LOGD(TAG, "Fetching forecast from: %s", url.c_str());
     if (this->fetch_url_(url, body)) {
+      ESP_LOGD(TAG, "Fetched %d bytes for forecast", body.size());
       this->parse_and_publish_forecast_(body);
       success_fc = true;
     } else {
@@ -83,7 +96,9 @@ void WeatherBOM::update() {
   {
     std::string body;
     std::string url = "https://api.weather.bom.gov.au/v1/locations/" + this->geohash_ + "/warnings";
+    ESP_LOGD(TAG, "Fetching warnings from: %s", url.c_str());
     if (this->fetch_url_(url, body)) {
+      ESP_LOGD(TAG, "Fetched %d bytes for warnings", body.size());
       this->parse_and_publish_warnings_(body);
       success_warn = true;
     } else {
@@ -91,9 +106,11 @@ void WeatherBOM::update() {
     }
   }
 
-  // Update timestamp only if all succeeded
+  // Update timestamp only if at least one succeeded
   if (success_obs || success_fc || success_warn) {
     this->publish_last_update_();
+  } else {
+    ESP_LOGW(TAG, "No successful fetches, skipping last_update");
   }
 #endif
 }
@@ -106,36 +123,59 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
   if (this->have_static_lat_ && this->have_static_lon_) {
     lat = this->static_lat_;
     lon = this->static_lon_;
+    ESP_LOGD(TAG, "Using static lat/lon: %f, %f", lat, lon);
   } else if (this->have_dynamic_) {
     lat = this->dynamic_lat_;
     lon = this->dynamic_lon_;
+    ESP_LOGD(TAG, "Using dynamic lat/lon: %f, %f", lat, lon);
   } else {
+    ESP_LOGD(TAG, "No lat/lon available for geohash resolution");
     return false;
   }
 
-  if (std::isnan(lat) || std::isnan(lon)) return false;
+  if (std::isnan(lat) || std::isnan(lon)) {
+    ESP_LOGD(TAG, "Invalid lat/lon for geohash resolution");
+    return false;
+  }
 
   char q[128];
   snprintf(q, sizeof(q), "https://api.weather.bom.gov.au/v1/locations?search=%f,%f", lat, lon);
+  ESP_LOGD(TAG, "Resolving geohash with URL: %s", q);
 
   std::string resp;
-  if (!this->fetch_url_(q, resp)) return false;
+  if (!this->fetch_url_(q, resp)) {
+    ESP_LOGW(TAG, "Failed to fetch geohash resolution response");
+    return false;
+  }
+  ESP_LOGD(TAG, "Fetched %d bytes for geohash resolution: %.100s...", resp.size(), resp.c_str());
 
   cJSON *root = cJSON_ParseWithLength(resp.c_str(), resp.size());
-  if (!root) return false;
+  if (!root) {
+    ESP_LOGW(TAG, "Failed to parse geohash JSON");
+    return false;
+  }
 
   cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
   if (data && cJSON_IsArray(data) && cJSON_GetArraySize(data) > 0) {
     cJSON *first = cJSON_GetArrayItem(data, 0);
     cJSON *gh = cJSON_GetObjectItemCaseSensitive(first, "geohash");
     cJSON *nm = cJSON_GetObjectItemCaseSensitive(first, "name");
-    if (cJSON_IsString(gh)) {
+    if (cJSON_IsString(gh) && gh->valuestring != nullptr) {
       this->geohash_ = gh->valuestring;
-      if (this->out_geohash_) this->out_geohash_->publish_state(this->geohash_);
+      ESP_LOGD(TAG, "Resolved geohash: %s", this->geohash_.c_str());
+      if (this->out_geohash_) {
+        this->out_geohash_->publish_state(this->geohash_);
+        ESP_LOGD(TAG, "Published resolved geohash: %s", this->geohash_.c_str());
+      }
+    } else {
+      ESP_LOGW(TAG, "No geohash in response");
     }
-    if (cJSON_IsString(nm) && this->location_name_) {
+    if (cJSON_IsString(nm) && nm->valuestring != nullptr && this->location_name_) {
       this->location_name_->publish_state(nm->valuestring);
+      ESP_LOGD(TAG, "Published location name: %s", nm->valuestring);
     }
+  } else {
+    ESP_LOGW(TAG, "No data array or empty in geohash response");
   }
   cJSON_Delete(root);
 
@@ -152,7 +192,7 @@ bool WeatherBOM::fetch_url_(const std::string &url, std::string &out) {
   cfg.timeout_ms = 10000;
   cfg.transport_type = HTTP_TRANSPORT_OVER_SSL;
   cfg.crt_bundle_attach = esp_crt_bundle_attach;
-  cfg.buffer_size = 2048;
+  cfg.buffer_size = 4096;  // Increased buffer size
   cfg.buffer_size_tx = 1024;
 
   esp_http_client_handle_t client = esp_http_client_init(&cfg);
@@ -163,14 +203,25 @@ bool WeatherBOM::fetch_url_(const std::string &url, std::string &out) {
 
   esp_err_t err = esp_http_client_set_method(client, HTTP_METHOD_GET);
   if (err != ESP_OK) {
-    ESP_LOGE(TAG, "set_method failed: %s", esp_err_to_name(err));
+    ESP_LOGE(TAG, "set_method failed: %s for %s", esp_err_to_name(err), url.c_str());
     esp_http_client_cleanup(client);
     return false;
   }
 
   err = esp_http_client_open(client, 0);
   if (err != ESP_OK) {
-    ESP_LOGE(TAG, "open failed: %s (%s)", esp_err_to_name(err), url.c_str());
+    ESP_LOGE(TAG, "open failed: %s for %s", esp_err_to_name(err), url.c_str());
+    esp_http_client_cleanup(client);
+    return false;
+  }
+
+  int content_length = esp_http_client_fetch_headers(client);
+  int status = esp_http_client_get_status_code(client);
+  ESP_LOGD(TAG, "HTTP status: %d, content_length: %d for %s", status, content_length, url.c_str());
+
+  if (status != 200) {
+    ESP_LOGW(TAG, "Non-200 status %d for %s", status, url.c_str());
+    esp_http_client_close(client);
     esp_http_client_cleanup(client);
     return false;
   }
@@ -179,15 +230,26 @@ bool WeatherBOM::fetch_url_(const std::string &url, std::string &out) {
   char buf[1024];
   while (true) {
     int r = esp_http_client_read(client, buf, sizeof(buf));
-    if (r <= 0) break;
+    if (r < 0) {
+      ESP_LOGE(TAG, "Read error: %d for %s", r, url.c_str());
+      break;
+    }
+    if (r == 0) break;
     out.append(buf, r);
-    if (out.size() > 512 * 1024) break;
+    if (out.size() > 512 * 1024) {
+      ESP_LOGW(TAG, "Response too large, truncating for %s", url.c_str());
+      break;
+    }
   }
 
   esp_http_client_close(client);
   esp_http_client_cleanup(client);
 
-  return !out.empty();
+  bool success = !out.empty();
+  if (!success) {
+    ESP_LOGW(TAG, "Empty response for %s", url.c_str());
+  }
+  return success;
 #endif
 }
 
@@ -195,25 +257,50 @@ void WeatherBOM::parse_and_publish_observations_(const std::string &json) {
 #ifndef USE_ESP_IDF
   return;
 #else
+  ESP_LOGD(TAG, "Parsing observations JSON: %.100s...", json.c_str());
+
   cJSON *root = cJSON_ParseWithLength(json.c_str(), json.size());
-  if (!root) return;
+  if (!root) {
+    ESP_LOGW(TAG, "Failed to parse observations JSON");
+    return;
+  }
 
   cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
   if (cJSON_IsObject(data)) {
     cJSON *temp = cJSON_GetObjectItemCaseSensitive(data, "temp");
-    if (cJSON_IsNumber(temp) && this->temperature_) this->temperature_->publish_state((float) temp->valuedouble);
+    if (cJSON_IsNumber(temp)) {
+      float val = (float) temp->valuedouble;
+      ESP_LOGD(TAG, "Extracted temperature: %f", val);
+      if (this->temperature_) this->temperature_->publish_state(val);
+    } else {
+      ESP_LOGD(TAG, "No temperature found");
+    }
 
     cJSON *hum = cJSON_GetObjectItemCaseSensitive(data, "humidity");
-    if (cJSON_IsNumber(hum) && this->humidity_) this->humidity_->publish_state((float) hum->valuedouble);
+    if (cJSON_IsNumber(hum)) {
+      float val = (float) hum->valuedouble;
+      ESP_LOGD(TAG, "Extracted humidity: %f", val);
+      if (this->humidity_) this->humidity_->publish_state(val);
+    } else {
+      ESP_LOGD(TAG, "No humidity found");
+    }
 
     float wind_val = NAN;
     cJSON *wind = cJSON_GetObjectItemCaseSensitive(data, "wind");
-    if (cJSON_IsNumber(wind)) wind_val = (float) wind->valuedouble;
-    if (cJSON_IsObject(wind)) {
+    if (cJSON_IsNumber(wind)) {
+      wind_val = (float) wind->valuedouble;
+    } else if (cJSON_IsObject(wind)) {
       cJSON *kmh = cJSON_GetObjectItemCaseSensitive(wind, "speed_kilometre");
       if (cJSON_IsNumber(kmh)) wind_val = (float) kmh->valuedouble;
     }
-    if (!std::isnan(wind_val) && this->wind_kmh_) this->wind_kmh_->publish_state(wind_val);
+    if (!std::isnan(wind_val)) {
+      ESP_LOGD(TAG, "Extracted wind_kmh: %f", wind_val);
+      if (this->wind_kmh_) this->wind_kmh_->publish_state(wind_val);
+    } else {
+      ESP_LOGD(TAG, "No wind speed found");
+    }
+  } else {
+    ESP_LOGW(TAG, "No 'data' object in observations");
   }
 
   cJSON_Delete(root);
@@ -246,21 +333,36 @@ void WeatherBOM::parse_and_publish_forecast_(const std::string &json) {
 #ifndef USE_ESP_IDF
   return;
 #else
+  ESP_LOGD(TAG, "Parsing forecast JSON: %.100s...", json.c_str());
+
   cJSON *root = cJSON_ParseWithLength(json.c_str(), json.size());
-  if (!root) return;
+  if (!root) {
+    ESP_LOGW(TAG, "Failed to parse forecast JSON");
+    return;
+  }
 
   cJSON *arr = cJSON_GetObjectItemCaseSensitive(root, "data");
-  if (!cJSON_IsArray(arr))
+  if (!cJSON_IsArray(arr)) {
     arr = cJSON_GetObjectItemCaseSensitive(root, "forecast");
+    ESP_LOGD(TAG, "Using 'forecast' instead of 'data'");
+  }
 
   if (cJSON_IsArray(arr)) {
+    int size = cJSON_GetArraySize(arr);
+    ESP_LOGD(TAG, "Forecast array size: %d", size);
+
     cJSON *day0 = cJSON_GetArrayItem(arr, 0);
     cJSON *day1 = cJSON_GetArrayItem(arr, 1);
 
     auto handle_day = [&](cJSON *day, bool is_today) {
-      if (!day) return;
+      if (!day) {
+        ESP_LOGD(TAG, "No day data for %s", is_today ? "today" : "tomorrow");
+        return;
+      }
       float tmin = _coalesce_number(day, "temp_min", "temperature_min");
+      ESP_LOGD(TAG, "%s min temp: %f", is_today ? "Today" : "Tomorrow", tmin);
       float tmax = _coalesce_number(day, "temp_max", "temperature_max");
+      ESP_LOGD(TAG, "%s max temp: %f", is_today ? "Today" : "Tomorrow", tmax);
       float chance = NAN;
       std::string amount;
       cJSON *rain = cJSON_GetObjectItemCaseSensitive(day, "rain");
@@ -271,9 +373,12 @@ void WeatherBOM::parse_and_publish_forecast_(const std::string &json) {
         chance = _coalesce_number(day, "chance_of_rain");
         amount = _coalesce_string(day, "rain_amount");
       }
+      ESP_LOGD(TAG, "%s rain chance: %f, amount: '%s'", is_today ? "Today" : "Tomorrow", chance, amount.c_str());
 
       std::string summary = _coalesce_string(day, "short_text", "summary");
+      ESP_LOGD(TAG, "%s summary: '%s'", is_today ? "Today" : "Tomorrow", summary.c_str());
       std::string icon = _coalesce_string(day, "icon_descriptor", "icon");
+      ESP_LOGD(TAG, "%s icon: '%s'", is_today ? "Today" : "Tomorrow", icon.c_str());
 
       if (is_today) {
         if (!std::isnan(tmin) && this->today_min_) this->today_min_->publish_state(tmin);
@@ -294,6 +399,8 @@ void WeatherBOM::parse_and_publish_forecast_(const std::string &json) {
 
     handle_day(day0, true);
     handle_day(day1, false);
+  } else {
+    ESP_LOGW(TAG, "No forecast array found");
   }
 
   cJSON_Delete(root);
@@ -304,22 +411,32 @@ void WeatherBOM::parse_and_publish_warnings_(const std::string &json) {
 #ifndef USE_ESP_IDF
   return;
 #else
-  if (!this->warnings_json_) return;
+  if (!this->warnings_json_) {
+    ESP_LOGD(TAG, "No warnings_json sensor configured, skipping");
+    return;
+  }
+
+  ESP_LOGD(TAG, "Parsing warnings JSON: %.100s...", json.c_str());
 
   cJSON *root = cJSON_ParseWithLength(json.c_str(), json.size());
   if (!root) {
+    ESP_LOGW(TAG, "Failed to parse warnings JSON, publishing empty");
     this->warnings_json_->publish_state("[]");
     return;
   }
 
   cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
   cJSON *to_emit = data ? data : root;
+  int size = cJSON_GetArraySize(to_emit);
+  ESP_LOGD(TAG, "Warnings data size: %d", size);
 
   char *printed = cJSON_PrintUnformatted(to_emit);
   if (printed) {
     this->warnings_json_->publish_state(printed);
+    ESP_LOGD(TAG, "Published warnings JSON: %.100s...", printed);
     cJSON_free(printed);
   } else {
+    ESP_LOGW(TAG, "Failed to print warnings JSON, publishing empty");
     this->warnings_json_->publish_state("[]");
   }
 
@@ -329,7 +446,10 @@ void WeatherBOM::parse_and_publish_warnings_(const std::string &json) {
 
 void WeatherBOM::publish_last_update_() {
 #ifdef USE_ESP_IDF
-  if (!last_update_) return;
+  if (!last_update_) {
+    ESP_LOGD(TAG, "No last_update sensor configured");
+    return;
+  }
   time_t now;
   time(&now);
   struct tm t;
@@ -337,6 +457,7 @@ void WeatherBOM::publish_last_update_() {
   char buf[32];
   strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &t);
   last_update_->publish_state(buf);
+  ESP_LOGD(TAG, "Published last_update: %s", buf);
 #endif
 }
 
