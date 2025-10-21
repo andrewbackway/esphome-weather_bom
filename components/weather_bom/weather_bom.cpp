@@ -1,8 +1,7 @@
 #include "weather_bom.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
-// OLD: #include "esphome/components/wifi/wifi_component.h"
-#include "esphome/components/network/network_component.h"
+#include "esphome/components/wifi/wifi_component.h"
 
 #ifdef USE_ESP_IDF
 #include "esp_http_client.h"
