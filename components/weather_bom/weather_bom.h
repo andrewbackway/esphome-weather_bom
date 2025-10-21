@@ -44,6 +44,7 @@ class WeatherBOM : public PollingComponent {
   void set_last_update_text(text_sensor::TextSensor *t) { last_update_ = t; }
 
   void setup() override;
+  void loop() override;
   void update() override;
   void dump_config() override;
 
