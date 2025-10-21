@@ -1,7 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor, text_sensor
-from esphome.const import CONF_LATITUDE, CONF_LONGITUDE
 
 AUTO_LOAD = ["sensor", "text_sensor"]
 CODEOWNERS = ["@andrew-b"]
@@ -19,6 +18,8 @@ ICON_CLOCK = "mdi:clock-outline"
 
 # Inputs
 CONF_GEOHASH = "geohash"
+CONF_LATITUDE = "latitude"
+CONF_LONGITUDE = "longitude"
 CONF_LAT_SENSOR = "latitude_sensor"
 CONF_LON_SENSOR = "longitude_sensor"
 
@@ -70,6 +71,14 @@ def _validate_location(cfg):
         raise cv.Invalid(
             "Provide exactly one location method: geohash OR latitude+longitude OR latitude_sensor+longitude_sensor"
         )
+
+    if lat is not None:
+        if not -90 <= lat <= 90:
+            raise cv.Invalid(f"Latitude must be between -90 and 90, got {lat}")
+    if lon is not None:
+        if not -180 <= lon <= 180:
+            raise cv.Invalid(f"Longitude must be between -180 and 180, got {lon}")
+
     return cfg
 
 
@@ -78,8 +87,8 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): cv.declare_id(WeatherBOM),
             cv.Optional(CONF_GEOHASH): cv.string,
-            cv.Optional(CONF_LATITUDE): cv.latitude,
-            cv.Optional(CONF_LONGITUDE): cv.longitude,
+            cv.Optional(CONF_LATITUDE): cv.float_,
+            cv.Optional(CONF_LONGITUDE): cv.float_,
             cv.Optional(CONF_LAT_SENSOR): cv.use_id(sensor.Sensor),
             cv.Optional(CONF_LON_SENSOR): cv.use_id(sensor.Sensor),
 
