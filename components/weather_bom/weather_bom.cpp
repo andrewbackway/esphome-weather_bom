@@ -1,18 +1,14 @@
-// ✅ WEATHER_BOM FOR ESPHOME + ESP-IDF (NO ARDUINO, NO NETWORK_COMPONENT)
-
 #include "weather_bom.h"
 
 #include "esphome/components/wifi/wifi_component.h"
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
 
-#ifdef USE_ESP_IDF
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#endif
 
 #include <cmath>
 #include <ctime>
@@ -60,10 +56,6 @@ void WeatherBOM::dump_config() {
 }
 
 void WeatherBOM::setup() {
-#ifndef USE_ESP_IDF
-  ESP_LOGE(TAG, "This component requires ESP-IDF.");
-  return;
-#else
   ESP_LOGD(TAG, "Setting up WeatherBOM...");
 
   // Dynamic GPS handling
@@ -87,7 +79,6 @@ void WeatherBOM::setup() {
   if (!this->geohash_.empty() && this->out_geohash_) {
     this->out_geohash_->publish_state(this->geohash_);
   }
-#endif
 }
 
 void WeatherBOM::loop() {
@@ -103,9 +94,6 @@ void WeatherBOM::loop() {
 }
 
 void WeatherBOM::update() {
-#ifndef USE_ESP_IDF
-  return;
-#else
   if (this->running_) {
     ESP_LOGD(TAG, "Fetch already running, skipping...");
     return;
@@ -118,8 +106,7 @@ void WeatherBOM::update() {
   }
 
   this->running_ = true;
-  xTaskCreate(fetch_task, "bom_fetch", 8192, this, 5, nullptr);
-#endif
+  xTaskCreate(fetch_task, "bom_fetch", 4096, this, 5, nullptr);
 }
 
 void WeatherBOM::fetch_task(void* pv) {
@@ -129,9 +116,6 @@ void WeatherBOM::fetch_task(void* pv) {
 }
 
 void WeatherBOM::do_fetch() {
-#ifndef USE_ESP_IDF
-  return;
-#else
   bool success_obs = false, success_fc = false, success_warn = false;
 
   // Resolve geohash first if needed
@@ -159,16 +143,21 @@ void WeatherBOM::do_fetch() {
         "/warnings";
   success_warn = this->fetch_url_(url, this->warn_body_);
 
+  if (!success_obs && !success_fc && !success_warn) {
+    ESP_LOGW(TAG, "All BOM fetches failed, not spawning process_task");
+    this->running_ = false;
+    return;
+  }
+
   // Launch a new FreeRTOS task for processing (to avoid blocking main loop)
   xTaskCreatePinnedToCore(&WeatherBOM::process_task,  // Task function
                           "bom_process",              // Name
-                          8192,                       // Stack size
+                          4096,                       // Stack size
                           this,                       // Parameter
                           5,                          // Priority
                           nullptr,        // Task handle (not needed)
                           tskNO_AFFINITY  // Any core
   );
-#endif
 }
 
 void WeatherBOM::process_task(void* pv) {
@@ -203,9 +192,6 @@ void WeatherBOM::process_data() {
 }
 
 bool WeatherBOM::resolve_geohash_if_needed_() {
-#ifndef USE_ESP_IDF
-  return false;
-#else
   float lat = NAN, lon = NAN;
 
   if (this->have_static_lat_ && this->have_static_lon_) {
@@ -297,13 +283,12 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
         this->have_static_lon_ ? this->static_lon_ : this->dynamic_lon_;
   }
   return ok;
-#endif
 }
 
 bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
-#ifndef USE_ESP_IDF
-  return false;
-#else
+  // Hard cap to avoid blowing heap on small MCUs
+  static constexpr size_t MAX_HTTP_BODY = 16 * 1024;  // 16 KB
+
   esp_http_client_config_t cfg = {};
   cfg.url = url.c_str();
   cfg.timeout_ms = 10000;
@@ -320,8 +305,7 @@ bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
 
   esp_err_t err = esp_http_client_set_method(client, HTTP_METHOD_GET);
   if (err != ESP_OK) {
-    ESP_LOGE(TAG, "set_method failed: %s for %s", esp_err_to_name(err),
-             url.c_str());
+    ESP_LOGE(TAG, "set_method failed: %s for %s", esp_err_to_name(err), url.c_str());
     esp_http_client_cleanup(client);
     return false;
   }
@@ -335,8 +319,8 @@ bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
 
   int content_length = esp_http_client_fetch_headers(client);
   int status = esp_http_client_get_status_code(client);
-  ESP_LOGD(TAG, "HTTP status: %d, content_length: %d for %s", status,
-           content_length, url.c_str());
+  ESP_LOGD(TAG, "HTTP status: %d, content_length: %d for %s",
+           status, content_length, url.c_str());
 
   if (status != 200) {
     ESP_LOGW(TAG, "Non-200 status %d for %s", status, url.c_str());
@@ -345,7 +329,19 @@ bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
     return false;
   }
 
+  // If server claims a huge body, don't even try.
+  if (content_length > 0 && content_length > (int)MAX_HTTP_BODY) {
+    ESP_LOGW(TAG,
+             "Content-Length %d > MAX_HTTP_BODY (%d) for %s, skipping",
+             content_length, (int)MAX_HTTP_BODY, url.c_str());
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return false;
+  }
+
   out.clear();
+  out.reserve(MAX_HTTP_BODY);  // avoid repeated reallocations
+
   char buf[1024];
   while (true) {
     int r = esp_http_client_read(client, buf, sizeof(buf));
@@ -354,26 +350,28 @@ bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
       break;
     }
     if (r == 0) break;
-    out.append(buf, r);
-    if (out.size() > 512 * 1024) {
-      ESP_LOGW(TAG, "Response too large, truncating for %s", url.c_str());
+
+    // Enforce cap before appending
+    size_t remaining = MAX_HTTP_BODY - out.size();
+    if (remaining == 0) {
+      ESP_LOGW(TAG, "Response reached MAX_HTTP_BODY (%d) for %s, truncating",
+               (int)MAX_HTTP_BODY, url.c_str());
       break;
     }
+    if ((size_t)r > remaining) r = (int)remaining;
+
+    out.append(buf, r);
   }
 
   esp_http_client_close(client);
   esp_http_client_cleanup(client);
 
   bool success = !out.empty();
-  if (!success) ESP_LOGW(TAG, "Empty response for %s", url.c_str());
+  if (!success) ESP_LOGW(TAG, "Empty or truncated response for %s", url.c_str());
   return success;
-#endif
 }
 
 void WeatherBOM::parse_and_publish_observations_(const std::string& json) {
-#ifndef USE_ESP_IDF
-  return;
-#else
   ESP_LOGD(TAG, "Parsing observations JSON: %.100s...", json.c_str());
 
   cJSON* root = cJSON_ParseWithLength(json.c_str(), json.size());
@@ -419,7 +417,6 @@ void WeatherBOM::parse_and_publish_observations_(const std::string& json) {
   }
 
   cJSON_Delete(root);
-#endif
 }
 
 // file-local helpers for forecast parsing
@@ -448,9 +445,6 @@ static std::string _wb_coalesce_string(cJSON* obj, const char* k1,
 }
 
 void WeatherBOM::parse_and_publish_forecast_(const std::string& json) {
-#ifndef USE_ESP_IDF
-  return;
-#else
   if (json.empty()) {
     ESP_LOGD(TAG, "No forecast JSON to parse");
     return;
@@ -564,13 +558,9 @@ void WeatherBOM::parse_and_publish_forecast_(const std::string& json) {
   }
 
   cJSON_Delete(root);
-#endif
 }
 
 void WeatherBOM::parse_and_publish_warnings_(const std::string& json) {
-#ifndef USE_ESP_IDF
-  return;
-#else
   if (!this->warnings_json_) return;
 
   if (json.empty()) {
@@ -598,11 +588,9 @@ void WeatherBOM::parse_and_publish_warnings_(const std::string& json) {
   }
 
   cJSON_Delete(root);
-#endif
 }
 
 void WeatherBOM::publish_last_update_() {
-#ifdef USE_ESP_IDF
   if (!this->last_update_) return;
 
   time_t now;
@@ -612,7 +600,6 @@ void WeatherBOM::publish_last_update_() {
   char buf[32];
   strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &t);
   this->last_update_->publish_state(buf);
-#endif
 }
 
 }  // namespace weather_bom
