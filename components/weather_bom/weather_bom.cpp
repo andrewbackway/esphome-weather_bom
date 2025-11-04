@@ -106,7 +106,7 @@ void WeatherBOM::update() {
   }
 
   this->running_ = true;
-  xTaskCreate(fetch_task, "bom_fetch", 4096, this, 5, nullptr);
+  xTaskCreate(fetch_task, "bom_fetch", 8192, this, 5, nullptr);
 }
 
 void WeatherBOM::fetch_task(void* pv) {
@@ -152,7 +152,7 @@ void WeatherBOM::do_fetch() {
   // Launch a new FreeRTOS task for processing (to avoid blocking main loop)
   xTaskCreatePinnedToCore(&WeatherBOM::process_task,  // Task function
                           "bom_process",              // Name
-                          4096,                       // Stack size
+                          8192,                       // Stack size
                           this,                       // Parameter
                           5,                          // Priority
                           nullptr,        // Task handle (not needed)
