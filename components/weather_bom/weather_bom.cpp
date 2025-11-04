@@ -106,7 +106,7 @@ void WeatherBOM::update() {
   }
 
   this->running_ = true;
-  xTaskCreate(fetch_task, "bom_fetch", 8192, this, 5, nullptr);
+  xTaskCreate(fetch_task, "bom_fetch", 6144, this, 5, nullptr);
 }
 
 void WeatherBOM::fetch_task(void* pv) {
@@ -152,7 +152,7 @@ void WeatherBOM::do_fetch() {
   // Launch a new FreeRTOS task for processing (to avoid blocking main loop)
   xTaskCreatePinnedToCore(&WeatherBOM::process_task,  // Task function
                           "bom_process",              // Name
-                          8192,                       // Stack size
+                          6144,                       // Stack size
                           this,                       // Parameter
                           5,                          // Priority
                           nullptr,        // Task handle (not needed)
@@ -287,7 +287,7 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
 
 bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
   // Keep BOM payloads tiny – they’re only ~1 KB in practice.
-  static constexpr size_t MAX_HTTP_BODY = 2048;  // 2 KB cap
+  static constexpr size_t MAX_HTTP_BODY = 3072;  // 3 KB cap
 
   esp_http_client_config_t cfg = {};
   cfg.url = url.c_str();
