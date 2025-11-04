@@ -294,7 +294,7 @@ bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
   cfg.timeout_ms = 10000;
   cfg.transport_type = HTTP_TRANSPORT_OVER_SSL;
   cfg.crt_bundle_attach = esp_crt_bundle_attach;
-  cfg.buffer_size = 8192;
+  cfg.buffer_size = 4096;
   cfg.buffer_size_tx = 1024;
 
   esp_http_client_handle_t client = esp_http_client_init(&cfg);
