@@ -150,4 +150,3 @@ class WeatherBOM : public PollingComponent {
 
 }  // namespace weather_bom
 }  // namespace esphome
-::contentReference[oaicite:0]{index=0}
