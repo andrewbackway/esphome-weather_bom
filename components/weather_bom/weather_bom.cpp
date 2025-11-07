@@ -116,9 +116,9 @@ void WeatherBOM::update() {
 
   BaseType_t res = xTaskCreate(&WeatherBOM::fetch_task,  // Task function
                                "bom_fetch",              // Name
-                               4096,                     // Stack size (words)
+                               6144,                     // Stack size (words)
                                this,                     // Parameter
-                               5,                        // Priority
+                               3,                        // Priority
                                nullptr);                 // Task handle
 
   if (res != pdPASS) {
