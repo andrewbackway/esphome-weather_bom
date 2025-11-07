@@ -16,7 +16,7 @@
 namespace esphome {
 namespace weather_bom {
 
-static const char* const TAG = "weather_bom";
+static const char *const TAG = "weather_bom";
 
 void WeatherBOM::dump_config() {
   ESP_LOGCONFIG(TAG, "Weather BOM:");
@@ -40,14 +40,22 @@ void WeatherBOM::dump_config() {
   LOG_SENSOR("  ", "Today Min", this->today_min_);
   LOG_SENSOR("  ", "Today Max", this->today_max_);
   LOG_SENSOR("  ", "Today Rain Chance", this->today_rain_chance_);
+  LOG_SENSOR("  ", "Today Rain Min", this->today_rain_min_);
+  LOG_SENSOR("  ", "Today Rain Max", this->today_rain_max_);
   LOG_TEXT_SENSOR("  ", "Today Summary", this->today_summary_);
   LOG_TEXT_SENSOR("  ", "Today Icon", this->today_icon_);
+  LOG_TEXT_SENSOR("  ", "Today Sunrise", this->today_sunrise_);
+  LOG_TEXT_SENSOR("  ", "Today Sunset", this->today_sunset_);
 
   LOG_SENSOR("  ", "Tomorrow Min", this->tomorrow_min_);
   LOG_SENSOR("  ", "Tomorrow Max", this->tomorrow_max_);
   LOG_SENSOR("  ", "Tomorrow Rain Chance", this->tomorrow_rain_chance_);
+  LOG_SENSOR("  ", "Tomorrow Rain Min", this->tomorrow_rain_min_);
+  LOG_SENSOR("  ", "Tomorrow Rain Max", this->tomorrow_rain_max_);
   LOG_TEXT_SENSOR("  ", "Tomorrow Summary", this->tomorrow_summary_);
   LOG_TEXT_SENSOR("  ", "Tomorrow Icon", this->tomorrow_icon_);
+  LOG_TEXT_SENSOR("  ", "Tomorrow Sunrise", this->tomorrow_sunrise_);
+  LOG_TEXT_SENSOR("  ", "Tomorrow Sunset", this->tomorrow_sunset_);
 
   LOG_TEXT_SENSOR("  ", "Warnings JSON", this->warnings_json_);
   LOG_TEXT_SENSOR("  ", "Location Name", this->location_name_);
@@ -63,7 +71,8 @@ void WeatherBOM::setup() {
     this->lat_sensor_->add_on_state_callback([this](float v) {
       this->dynamic_lat_ = v;
       this->have_dynamic_ = !std::isnan(v) && !std::isnan(this->dynamic_lon_);
-      if (this->have_dynamic_ && this->geohash_.empty()) this->update();
+      if (this->have_dynamic_ && this->geohash_.empty())
+        this->update();
     });
   }
 
@@ -71,7 +80,8 @@ void WeatherBOM::setup() {
     this->lon_sensor_->add_on_state_callback([this](float v) {
       this->dynamic_lon_ = v;
       this->have_dynamic_ = !std::isnan(this->dynamic_lat_) && !std::isnan(v);
-      if (this->have_dynamic_ && this->geohash_.empty()) this->update();
+      if (this->have_dynamic_ && this->geohash_.empty())
+        this->update();
     });
   }
 
@@ -106,89 +116,95 @@ void WeatherBOM::update() {
   }
 
   this->running_ = true;
-  xTaskCreate(fetch_task, "bom_fetch", 6144, this, 5, nullptr);
+
+  // Single task that fetches & processes all endpoints sequentially
+  xTaskCreate(&WeatherBOM::fetch_task,  // Task function
+              "bom_fetch",              // Name
+              4096,                     // Stack size (words)
+              this,                     // Parameter
+              5,                        // Priority
+              nullptr);                 // Task handle
 }
 
-void WeatherBOM::fetch_task(void* pv) {
-  auto* self = static_cast<WeatherBOM*>(pv);
+// FreeRTOS task entry
+void WeatherBOM::fetch_task(void *pv) {
+  auto *self = static_cast<WeatherBOM *>(pv);
   self->do_fetch();
+  self->running_ = false;
   vTaskDelete(nullptr);
 }
 
+// Main fetch routine: fetch -> process -> free, for each endpoint in turn
 void WeatherBOM::do_fetch() {
-  bool success_obs = false, success_fc = false, success_warn = false;
+  bool success_any = false;
 
   // Resolve geohash first if needed
   if (this->geohash_.empty()) {
     if (!this->resolve_geohash_if_needed_()) {
       ESP_LOGW(TAG, "Could not resolve geohash (need lat/lon)");
-      App.scheduler.set_timeout(this, "bom_reset", 0,
-                                [this]() { this->running_ = false; });
       return;
     }
   }
 
-  // Fetch each endpoint
-  std::string url;
+  std::string body;
 
-  url = "https://api.weather.bom.gov.au/v1/locations/" + this->geohash_ +
-        "/observations";
-  success_obs = this->fetch_url_(url, this->obs_body_);
+  // ---------------------------------------------------------------------------
+  // 1) Observations
+  // ---------------------------------------------------------------------------
+  {
+    std::string url =
+        "https://api.weather.bom.gov.au/v1/locations/" + this->geohash_ + "/observations";
 
-  url = "https://api.weather.bom.gov.au/v1/locations/" + this->geohash_ +
-        "/forecasts/daily";
-  success_fc = this->fetch_url_(url, this->fc_body_);
+    ESP_LOGD(TAG, "Fetching observations: %s", url.c_str());
+    if (this->fetch_url_(url, body)) {
+      this->parse_and_publish_observations_(body);
+      success_any = true;
+    }
 
-  url = "https://api.weather.bom.gov.au/v1/locations/" + this->geohash_ +
-        "/warnings";
-  success_warn = this->fetch_url_(url, this->warn_body_);
-
-  if (!success_obs && !success_fc && !success_warn) {
-    ESP_LOGW(TAG, "All BOM fetches failed, not spawning process_task");
-    this->running_ = false;
-    return;
+    // Free body buffer before next large fetch
+    body.clear();
+    std::string().swap(body);
   }
 
-  // Launch a new FreeRTOS task for processing (to avoid blocking main loop)
-  xTaskCreatePinnedToCore(&WeatherBOM::process_task,  // Task function
-                          "bom_process",              // Name
-                          6144,                       // Stack size
-                          this,                       // Parameter
-                          5,                          // Priority
-                          nullptr,        // Task handle (not needed)
-                          tskNO_AFFINITY  // Any core
-  );
-}
+  // ---------------------------------------------------------------------------
+  // 2) Daily forecast
+  // ---------------------------------------------------------------------------
+  {
+    std::string url =
+        "https://api.weather.bom.gov.au/v1/locations/" + this->geohash_ + "/forecasts/daily";
 
-void WeatherBOM::process_task(void* pv) {
-  auto* self = static_cast<WeatherBOM*>(pv);
+    ESP_LOGD(TAG, "Fetching forecast: %s", url.c_str());
+    if (this->fetch_url_(url, body)) {
+      this->parse_and_publish_forecast_(body);
+      success_any = true;
+    }
 
-  // Parse and publish data (runs off main loop)
-  self->process_data();
+    body.clear();
+    std::string().swap(body);
+  }
 
-  // Only publish timestamp if any success
-  self->publish_last_update_();
+  // ---------------------------------------------------------------------------
+  // 3) Warnings
+  // ---------------------------------------------------------------------------
+  {
+    std::string url =
+        "https://api.weather.bom.gov.au/v1/locations/" + this->geohash_ + "/warnings";
 
-  // Cleanup memory
-  self->obs_body_.clear();
-  self->fc_body_.clear();
-  self->warn_body_.clear();
+    ESP_LOGD(TAG, "Fetching warnings: %s", url.c_str());
+    if (this->fetch_url_(url, body)) {
+      this->parse_and_publish_warnings_(body);
+      success_any = true;
+    }
 
-  // Mark as finished
-  self->running_ = false;
+    body.clear();
+    std::string().swap(body);
+  }
 
-  // Kill this task
-  vTaskDelete(nullptr);
-}
-
-void WeatherBOM::process_data() {
-  this->parse_and_publish_observations_(this->obs_body_);
-  this->parse_and_publish_forecast_(this->fc_body_);
-  this->parse_and_publish_warnings_(this->warn_body_);
-  // Free memory
-  this->obs_body_.clear();
-  this->fc_body_.clear();
-  this->warn_body_.clear();
+  if (success_any) {
+    this->publish_last_update_();
+  } else {
+    ESP_LOGW(TAG, "All BOM fetches failed");
+  }
 }
 
 bool WeatherBOM::resolve_geohash_if_needed_() {
@@ -214,8 +230,7 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
 
   char q[128];
   snprintf(q, sizeof(q),
-           "https://api.weather.bom.gov.au/v1/locations?search=%f,%f", lat,
-           lon);
+           "https://api.weather.bom.gov.au/v1/locations?search=%f,%f", lat, lon);
   ESP_LOGD(TAG, "Resolving geohash with URL: %s", q);
 
   std::string resp;
@@ -224,29 +239,29 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
     return false;
   }
   ESP_LOGD(TAG, "Fetched %d bytes for geohash resolution: %.100s...",
-           (int)resp.size(), resp.c_str());
+           (int) resp.size(), resp.c_str());
 
-  cJSON* root = cJSON_ParseWithLength(resp.c_str(), resp.size());
+  cJSON *root = cJSON_ParseWithLength(resp.c_str(), resp.size());
   if (!root) {
     ESP_LOGW(TAG, "Failed to parse geohash JSON");
     return false;
   }
 
   bool ok = false;
-  cJSON* data = cJSON_GetObjectItemCaseSensitive(root, "data");
+  cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
   if (data && cJSON_IsArray(data) && cJSON_GetArraySize(data) > 0) {
-    cJSON* first = cJSON_GetArrayItem(data, 0);
-    cJSON* gh = cJSON_GetObjectItemCaseSensitive(first, "geohash");
-    cJSON* nm = cJSON_GetObjectItemCaseSensitive(first, "name");
+    cJSON *first = cJSON_GetArrayItem(data, 0);
+    cJSON *gh = cJSON_GetObjectItemCaseSensitive(first, "geohash");
+    cJSON *nm = cJSON_GetObjectItemCaseSensitive(first, "name");
 
     if (cJSON_IsString(gh) && gh->valuestring != nullptr) {
       std::string full_geohash = gh->valuestring;
 
-      // ✅ Truncate to first 6 chars for BOM compatibility
+      // Truncate to first 6 chars for BOM compatibility
       if (full_geohash.length() > 6) {
         ESP_LOGW(TAG,
                  "Geohash '%s' too long (%d). Truncating to '%s' for BOM API.",
-                 full_geohash.c_str(), full_geohash.length(),
+                 full_geohash.c_str(), (int) full_geohash.length(),
                  full_geohash.substr(0, 6).c_str());
         this->geohash_ = full_geohash.substr(0, 6);
       } else {
@@ -263,7 +278,7 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
       ESP_LOGW(TAG, "No geohash in response");
     }
 
-    // ✅ Publish location name only if available
+    // Publish location name only if available
     if (cJSON_IsString(nm) && nm->valuestring && this->location_name_) {
       this->location_name_->publish_state(nm->valuestring);
       ESP_LOGD(TAG, "Location name: %s", nm->valuestring);
@@ -285,9 +300,9 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
   return ok;
 }
 
-bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
-  // Keep BOM payloads tiny – they’re only ~1 KB in practice.
-  static constexpr size_t MAX_HTTP_BODY = 8192;  // 8 KB cap
+bool WeatherBOM::fetch_url_(const std::string &url, std::string &out) {
+  // Keep BOM payloads small; cap at 4 KB to bound memory.
+  static constexpr size_t MAX_HTTP_BODY = 4096;
 
   esp_http_client_config_t cfg = {};
   cfg.url = url.c_str();
@@ -305,22 +320,24 @@ bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
 
   esp_err_t err = esp_http_client_set_method(client, HTTP_METHOD_GET);
   if (err != ESP_OK) {
-    ESP_LOGE(TAG, "set_method failed: %s for %s", esp_err_to_name(err), url.c_str());
+    ESP_LOGE(TAG, "set_method failed: %s for %s", esp_err_to_name(err),
+             url.c_str());
     esp_http_client_cleanup(client);
     return false;
   }
 
   err = esp_http_client_open(client, 0);
   if (err != ESP_OK) {
-    ESP_LOGE(TAG, "open failed: %s for %s", esp_err_to_name(err), url.c_str());
+    ESP_LOGE(TAG, "open failed: %s for %s", esp_err_to_name(err),
+             url.c_str());
     esp_http_client_cleanup(client);
     return false;
   }
 
   int content_length = esp_http_client_fetch_headers(client);
   int status = esp_http_client_get_status_code(client);
-  ESP_LOGD(TAG, "HTTP status: %d, content_length: %d for %s",
-           status, content_length, url.c_str());
+  ESP_LOGD(TAG, "HTTP status: %d, content_length: %d for %s", status,
+           content_length, url.c_str());
 
   if (status != 200) {
     ESP_LOGW(TAG, "Non-200 status %d for %s", status, url.c_str());
@@ -330,10 +347,10 @@ bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
   }
 
   // If server claims a huge body, don't even try.
-  if (content_length > 0 && content_length > (int)MAX_HTTP_BODY) {
+  if (content_length > 0 && content_length > (int) MAX_HTTP_BODY) {
     ESP_LOGW(TAG,
              "Content-Length %d > MAX_HTTP_BODY (%d) for %s, skipping",
-             content_length, (int)MAX_HTTP_BODY, url.c_str());
+             content_length, (int) MAX_HTTP_BODY, url.c_str());
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
     return false;
@@ -349,16 +366,19 @@ bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
       ESP_LOGE(TAG, "Read error: %d for %s", r, url.c_str());
       break;
     }
-    if (r == 0) break;
+    if (r == 0)
+      break;
 
     // Enforce cap before appending
     size_t remaining = MAX_HTTP_BODY - out.size();
     if (remaining == 0) {
-      ESP_LOGW(TAG, "Response reached MAX_HTTP_BODY (%d) for %s, truncating",
-               (int)MAX_HTTP_BODY, url.c_str());
+      ESP_LOGW(TAG,
+               "Response reached MAX_HTTP_BODY (%d) for %s, truncating",
+               (int) MAX_HTTP_BODY, url.c_str());
       break;
     }
-    if ((size_t)r > remaining) r = (int)remaining;
+    if ((size_t) r > remaining)
+      r = (int) remaining;
 
     out.append(buf, r);
   }
@@ -367,50 +387,56 @@ bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
   esp_http_client_cleanup(client);
 
   bool success = !out.empty();
-  if (!success) ESP_LOGW(TAG, "Empty or truncated response for %s", url.c_str());
+  if (!success)
+    ESP_LOGW(TAG, "Empty or truncated response for %s", url.c_str());
   return success;
 }
 
-void WeatherBOM::parse_and_publish_observations_(const std::string& json) {
+void WeatherBOM::parse_and_publish_observations_(const std::string &json) {
   ESP_LOGD(TAG, "Parsing observations JSON: %.100s...", json.c_str());
 
-  cJSON* root = cJSON_ParseWithLength(json.c_str(), json.size());
+  cJSON *root = cJSON_ParseWithLength(json.c_str(), json.size());
   if (!root) {
     ESP_LOGW(TAG, "Failed to parse observations JSON");
     return;
   }
 
-  cJSON* data = cJSON_GetObjectItemCaseSensitive(root, "data");
+  cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
   if (cJSON_IsObject(data)) {
     // Temperature
-    cJSON* temp = cJSON_GetObjectItemCaseSensitive(data, "temp");
+    cJSON *temp = cJSON_GetObjectItemCaseSensitive(data, "temp");
     if (cJSON_IsNumber(temp)) {
-      float val = (float)temp->valuedouble;
+      float val = (float) temp->valuedouble;
       ESP_LOGD(TAG, "Temperature: %f", val);
-      if (this->temperature_) this->temperature_->publish_state(val);
+      if (this->temperature_)
+        this->temperature_->publish_state(val);
     }
 
     // Rain since 9 AM
-    cJSON* rain = cJSON_GetObjectItemCaseSensitive(data, "rain_since_9am");
+    cJSON *rain = cJSON_GetObjectItemCaseSensitive(data, "rain_since_9am");
     if (cJSON_IsNumber(rain)) {
-      float val = (float)rain->valuedouble;
+      float val = (float) rain->valuedouble;
       ESP_LOGD(TAG, "Rain since 9AM: %f", val);
-      if (this->rain_since_9am_) this->rain_since_9am_->publish_state(val);
+      if (this->rain_since_9am_)
+        this->rain_since_9am_->publish_state(val);
     }
 
-    //  Humidity
-    cJSON* hum = cJSON_GetObjectItemCaseSensitive(data, "humidity");
+    // Humidity
+    cJSON *hum = cJSON_GetObjectItemCaseSensitive(data, "humidity");
     if (cJSON_IsNumber(hum)) {
-      float val = (float)hum->valuedouble;
-      if (this->humidity_) this->humidity_->publish_state(val);
+      float val = (float) hum->valuedouble;
+      if (this->humidity_)
+        this->humidity_->publish_state(val);
     }
 
     // Wind data
     float wind_val = NAN;
-    cJSON* wind = cJSON_GetObjectItemCaseSensitive(data, "wind");
+    cJSON *wind = cJSON_GetObjectItemCaseSensitive(data, "wind");
     if (cJSON_IsObject(wind)) {
-      cJSON* kmh = cJSON_GetObjectItemCaseSensitive(wind, "speed_kilometre");
-      if (cJSON_IsNumber(kmh)) wind_val = (float)kmh->valuedouble;
+      cJSON *kmh =
+          cJSON_GetObjectItemCaseSensitive(wind, "speed_kilometre");
+      if (cJSON_IsNumber(kmh))
+        wind_val = (float) kmh->valuedouble;
     }
     if (!std::isnan(wind_val) && this->wind_kmh_)
       this->wind_kmh_->publish_state(wind_val);
@@ -420,58 +446,65 @@ void WeatherBOM::parse_and_publish_observations_(const std::string& json) {
 }
 
 // file-local helpers for forecast parsing
-static float _wb_coalesce_number(cJSON* obj, const char* k1,
-                                 const char* k2 = nullptr) {
-  if (!obj) return NAN;
-  cJSON* v = cJSON_GetObjectItemCaseSensitive(obj, k1);
-  if (cJSON_IsNumber(v)) return (float)v->valuedouble;
+static float _wb_coalesce_number(cJSON *obj, const char *k1,
+                                 const char *k2 = nullptr) {
+  if (!obj)
+    return NAN;
+  cJSON *v = cJSON_GetObjectItemCaseSensitive(obj, k1);
+  if (cJSON_IsNumber(v))
+    return (float) v->valuedouble;
   if (k2 != nullptr) {
     v = cJSON_GetObjectItemCaseSensitive(obj, k2);
-    if (cJSON_IsNumber(v)) return (float)v->valuedouble;
+    if (cJSON_IsNumber(v))
+      return (float) v->valuedouble;
   }
   return NAN;
 }
 
-static std::string _wb_coalesce_string(cJSON* obj, const char* k1,
-                                       const char* k2 = nullptr) {
-  if (!obj) return {};
-  cJSON* v = cJSON_GetObjectItemCaseSensitive(obj, k1);
-  if (cJSON_IsString(v) && v->valuestring) return std::string(v->valuestring);
+static std::string _wb_coalesce_string(cJSON *obj, const char *k1,
+                                       const char *k2 = nullptr) {
+  if (!obj)
+    return {};
+  cJSON *v = cJSON_GetObjectItemCaseSensitive(obj, k1);
+  if (cJSON_IsString(v) && v->valuestring)
+    return std::string(v->valuestring);
   if (k2 != nullptr) {
     v = cJSON_GetObjectItemCaseSensitive(obj, k2);
-    if (cJSON_IsString(v) && v->valuestring) return std::string(v->valuestring);
+    if (cJSON_IsString(v) && v->valuestring)
+      return std::string(v->valuestring);
   }
   return {};
 }
 
-void WeatherBOM::parse_and_publish_forecast_(const std::string& json) {
+void WeatherBOM::parse_and_publish_forecast_(const std::string &json) {
   if (json.empty()) {
     ESP_LOGD(TAG, "No forecast JSON to parse");
     return;
   }
 
   ESP_LOGD(TAG, "Parsing forecast JSON: %.100s...", json.c_str());
-  cJSON* root = cJSON_ParseWithLength(json.c_str(), json.size());
+  cJSON *root = cJSON_ParseWithLength(json.c_str(), json.size());
   if (!root) {
     ESP_LOGW(TAG, "Failed to parse forecast JSON");
     return;
   }
 
-  cJSON* arr = cJSON_GetObjectItemCaseSensitive(root, "data");
+  cJSON *arr = cJSON_GetObjectItemCaseSensitive(root, "data");
   if (!cJSON_IsArray(arr)) {
     arr = cJSON_GetObjectItemCaseSensitive(root, "forecast");
-    if (cJSON_IsArray(arr)) ESP_LOGD(TAG, "Using 'forecast' instead of 'data'");
+    if (cJSON_IsArray(arr))
+      ESP_LOGD(TAG, "Using 'forecast' instead of 'data'");
   }
 
   if (cJSON_IsArray(arr)) {
-    cJSON* day0 = cJSON_GetArrayItem(arr, 0);
-    cJSON* day1 = cJSON_GetArrayItem(arr, 1);
+    cJSON *day0 = cJSON_GetArrayItem(arr, 0);
+    cJSON *day1 = cJSON_GetArrayItem(arr, 1);
 
-    auto handle_day = [&](cJSON* day, bool is_today) {
-      if (!day) return;
+    auto handle_day = [&](cJSON *day, bool is_today) {
+      if (!day)
+        return;
 
-      // --- 1. Extract values into variables first ---
-
+      // 1. Extract values into variables first
       float tmin = _wb_coalesce_number(day, "temp_min", "temperature_min");
       float tmax = _wb_coalesce_number(day, "temp_max", "temperature_max");
 
@@ -479,15 +512,18 @@ void WeatherBOM::parse_and_publish_forecast_(const std::string& json) {
       float rain_max = NAN;
       float rain_chance = NAN;
       std::string sunrise, sunset;
-      std::string summary = _wb_coalesce_string(day, "short_text", "summary");
-      std::string icon = _wb_coalesce_string(day, "icon_descriptor", "icon");
+      std::string summary =
+          _wb_coalesce_string(day, "short_text", "summary");
+      std::string icon =
+          _wb_coalesce_string(day, "icon_descriptor", "icon");
 
       // Rain values
-      cJSON* rain = cJSON_GetObjectItemCaseSensitive(day, "rain");
+      cJSON *rain = cJSON_GetObjectItemCaseSensitive(day, "rain");
       if (rain) {
         rain_chance = _wb_coalesce_number(rain, "chance");
 
-        cJSON* amount = cJSON_GetObjectItemCaseSensitive(rain, "amount");
+        cJSON *amount =
+            cJSON_GetObjectItemCaseSensitive(rain, "amount");
         if (amount) {
           rain_min = _wb_coalesce_number(amount, "min");
           rain_max = _wb_coalesce_number(amount, "max");
@@ -495,14 +531,14 @@ void WeatherBOM::parse_and_publish_forecast_(const std::string& json) {
       }
 
       // Sunrise/Sunset
-      cJSON* astro = cJSON_GetObjectItemCaseSensitive(day, "astronomical");
+      cJSON *astro =
+          cJSON_GetObjectItemCaseSensitive(day, "astronomical");
       if (astro) {
         sunrise = _wb_coalesce_string(astro, "sunrise_time");
         sunset = _wb_coalesce_string(astro, "sunset_time");
       }
 
-      // --- 2. Now publish in grouped style (consistent with your code) ---
-
+      // 2. Publish grouped style
       if (is_today) {
         if (!std::isnan(tmin) && this->today_min_)
           this->today_min_->publish_state(tmin);
@@ -560,8 +596,9 @@ void WeatherBOM::parse_and_publish_forecast_(const std::string& json) {
   cJSON_Delete(root);
 }
 
-void WeatherBOM::parse_and_publish_warnings_(const std::string& json) {
-  if (!this->warnings_json_) return;
+void WeatherBOM::parse_and_publish_warnings_(const std::string &json) {
+  if (!this->warnings_json_)
+    return;
 
   if (json.empty()) {
     this->warnings_json_->publish_state("[]");
@@ -569,18 +606,27 @@ void WeatherBOM::parse_and_publish_warnings_(const std::string& json) {
   }
 
   ESP_LOGD(TAG, "Parsing warnings JSON: %.100s...", json.c_str());
-  cJSON* root = cJSON_ParseWithLength(json.c_str(), json.size());
+  cJSON *root = cJSON_ParseWithLength(json.c_str(), json.size());
   if (!root) {
     ESP_LOGW(TAG, "Failed to parse warnings JSON, publishing empty");
     this->warnings_json_->publish_state("[]");
     return;
   }
 
-  cJSON* data = cJSON_GetObjectItemCaseSensitive(root, "data");
-  cJSON* to_emit = data ? data : root;
+  cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+  cJSON *to_emit = data ? data : root;
 
-  char* printed = cJSON_PrintUnformatted(to_emit);
+  static constexpr size_t MAX_WARNINGS_JSON = 2048;
+
+  char *printed = cJSON_PrintUnformatted(to_emit);
   if (printed) {
+    size_t len = strlen(printed);
+    if (len > MAX_WARNINGS_JSON) {
+      ESP_LOGW(TAG,
+               "Warnings JSON %u bytes > %u, truncating for publish",
+               (unsigned) len, (unsigned) MAX_WARNINGS_JSON);
+      printed[MAX_WARNINGS_JSON] = '\0';
+    }
     this->warnings_json_->publish_state(printed);
     cJSON_free(printed);
   } else {
@@ -591,7 +637,8 @@ void WeatherBOM::parse_and_publish_warnings_(const std::string& json) {
 }
 
 void WeatherBOM::publish_last_update_() {
-  if (!this->last_update_) return;
+  if (!this->last_update_)
+    return;
 
   time_t now;
   time(&now);
