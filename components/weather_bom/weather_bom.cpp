@@ -309,8 +309,8 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
 }
 
 bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
-  // Keep BOM payloads small; cap at 4 KB to bound memory.
-  static constexpr size_t MAX_HTTP_BODY = 4096;
+  // Keep BOM payloads small; cap at 8 KB to bound memory.
+  static constexpr size_t MAX_HTTP_BODY = 8192;
 
   esp_http_client_config_t cfg = {};
   cfg.url = url.c_str();
