@@ -43,6 +43,8 @@ void WeatherBOM::dump_config() {
   LOG_SENSOR("  ", "Today Rain Max", this->today_rain_max_);
   LOG_TEXT_SENSOR("  ", "Today Summary", this->today_summary_);
   LOG_TEXT_SENSOR("  ", "Today Icon", this->today_icon_);
+  LOG_TEXT_SENSOR("  ", "Today Sunrise", this->today_sunrise_);
+  LOG_TEXT_SENSOR("  ", "Today Sunset", this->today_sunset_);
 
   LOG_SENSOR("  ", "Tomorrow Min", this->tomorrow_min_);
   LOG_SENSOR("  ", "Tomorrow Max", this->tomorrow_max_);
@@ -51,6 +53,8 @@ void WeatherBOM::dump_config() {
   LOG_SENSOR("  ", "Tomorrow Rain Max", this->tomorrow_rain_max_);
   LOG_TEXT_SENSOR("  ", "Tomorrow Summary", this->tomorrow_summary_);
   LOG_TEXT_SENSOR("  ", "Tomorrow Icon", this->tomorrow_icon_);
+  LOG_TEXT_SENSOR("  ", "Tomorrow Sunrise", this->tomorrow_sunrise_);
+  LOG_TEXT_SENSOR("  ", "Tomorrow Sunset", this->tomorrow_sunset_);
 
   LOG_TEXT_SENSOR("  ", "Warnings JSON", this->warnings_json_);
   LOG_TEXT_SENSOR("  ", "Location Name", this->location_name_);
@@ -112,7 +116,7 @@ void WeatherBOM::update() {
 
   BaseType_t res = xTaskCreate(&WeatherBOM::fetch_task,  // Task function
                                "bom_fetch",              // Name
-                               8192,                     // Stack size (words)
+                               6144,                     // Stack size (words)
                                this,                     // Parameter
                                3,                        // Priority
                                nullptr);                 // Task handle
@@ -146,10 +150,10 @@ void WeatherBOM::do_fetch() {
     if (!this->resolve_geohash_if_needed_()) {
       ESP_LOGW(TAG, "Could not resolve geohash (need lat/lon)");
       return;
-  }
+    }
   }
 
-  char body[32769];  // 32KB + 1 for null
+  std::string body;
 
   // ---------------------------------------------------------------------------
   // 1) Observations
@@ -159,10 +163,14 @@ void WeatherBOM::do_fetch() {
                       this->geohash_ + "/observations";
 
     ESP_LOGD(TAG, "Fetching observations: %s", url.c_str());
-    if (this->fetch_url_(url, body, sizeof(body) - 1)) {
+    if (this->fetch_url_(url, body)) {
       this->parse_and_publish_observations_(body);
       success_any = true;
     }
+
+    // Free body buffer before next large fetch
+    body.clear();
+    std::string().swap(body);
   }
 
   // ---------------------------------------------------------------------------
@@ -173,10 +181,13 @@ void WeatherBOM::do_fetch() {
                       this->geohash_ + "/forecasts/daily";
 
     ESP_LOGD(TAG, "Fetching forecast: %s", url.c_str());
-    if (this->fetch_url_(url, body, sizeof(body) - 1)) {
+    if (this->fetch_url_(url, body)) {
       this->parse_and_publish_forecast_(body);
       success_any = true;
     }
+
+    body.clear();
+    std::string().swap(body);
   }
 
   // ---------------------------------------------------------------------------
@@ -187,10 +198,13 @@ void WeatherBOM::do_fetch() {
                       this->geohash_ + "/warnings";
 
     ESP_LOGD(TAG, "Fetching warnings: %s", url.c_str());
-    if (this->fetch_url_(url, body, sizeof(body) - 1)) {
+    if (this->fetch_url_(url, body)) {
       this->parse_and_publish_warnings_(body);
       success_any = true;
     }
+
+    body.clear();
+    std::string().swap(body);
   }
 
   if (success_any) {
@@ -227,15 +241,15 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
            lon);
   ESP_LOGD(TAG, "Resolving geohash with URL: %s", q);
 
-  char resp[32769];  // Same buffer size
-  if (!this->fetch_url_(std::string(q), resp, sizeof(resp) - 1)) {
+  std::string resp;
+  if (!this->fetch_url_(q, resp)) {
     ESP_LOGW(TAG, "Failed to fetch geohash resolution response");
     return false;
   }
   ESP_LOGD(TAG, "Fetched %d bytes for geohash resolution: %.100s...",
-           (int)strlen(resp), resp);
+           (int)resp.size(), resp.c_str());
 
-  cJSON* root = cJSON_ParseWithLength(resp, strlen(resp));
+  cJSON* root = cJSON_ParseWithLength(resp.c_str(), resp.size());
   if (!root) {
     ESP_LOGW(TAG, "Failed to parse geohash JSON");
     return false;
@@ -294,10 +308,9 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
   return ok;
 }
 
-bool WeatherBOM::fetch_url_(const std::string& url, char* out, size_t max_len) {
-  static constexpr size_t MAX_HTTP_BODY = 32768;
-
-  if (max_len > MAX_HTTP_BODY) max_len = MAX_HTTP_BODY;
+bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
+  // Keep BOM payloads small; cap at 8 KB to bound memory.
+  static constexpr size_t MAX_HTTP_BODY = 8192;
 
   esp_http_client_config_t cfg = {};
   cfg.url = url.c_str();
@@ -341,15 +354,17 @@ bool WeatherBOM::fetch_url_(const std::string& url, char* out, size_t max_len) {
   }
 
   // If server claims a huge body, don't even try.
-  if (content_length > 0 && content_length > (int)max_len) {
-    ESP_LOGW(TAG, "Content-Length %d > max_len (%d) for %s, skipping",
-             content_length, (int)max_len, url.c_str());
+  if (content_length > 0 && content_length > (int)MAX_HTTP_BODY) {
+    ESP_LOGW(TAG, "Content-Length %d > MAX_HTTP_BODY (%d) for %s, skipping",
+             content_length, (int)MAX_HTTP_BODY, url.c_str());
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
     return false;
   }
 
-  size_t total = 0;
+  out.clear();
+  out.reserve(MAX_HTTP_BODY);  // avoid repeated reallocations
+
   char buf[1024];
   while (true) {
     int r = esp_http_client_read(client, buf, sizeof(buf));
@@ -359,32 +374,31 @@ bool WeatherBOM::fetch_url_(const std::string& url, char* out, size_t max_len) {
     }
     if (r == 0) break;
 
-    size_t remaining = max_len - total;
+    // Enforce cap before appending
+    size_t remaining = MAX_HTTP_BODY - out.size();
     if (remaining == 0) {
-      ESP_LOGW(TAG, "Response reached max_len (%d) for %s, truncating",
-               (int)max_len, url.c_str());
+      ESP_LOGW(TAG, "Response reached MAX_HTTP_BODY (%d) for %s, truncating",
+               (int)MAX_HTTP_BODY, url.c_str());
       break;
     }
     if ((size_t)r > remaining) r = (int)remaining;
 
-    memcpy(out + total, buf, r);
-    total += r;
+    out.append(buf, r);
   }
-  out[total] = '\0';  // Null-terminate
 
   esp_http_client_close(client);
   esp_http_client_cleanup(client);
 
-  bool success = total > 0;
+  bool success = !out.empty();
   if (!success)
     ESP_LOGW(TAG, "Empty or truncated response for %s", url.c_str());
   return success;
 }
 
-void WeatherBOM::parse_and_publish_observations_(const char* json) {
-  ESP_LOGD(TAG, "Parsing observations JSON: %.100s...", json);
+void WeatherBOM::parse_and_publish_observations_(const std::string& json) {
+  ESP_LOGD(TAG, "Parsing observations JSON: %.100s...", json.c_str());
 
-  cJSON* root = cJSON_ParseWithLength(json, strlen(json));
+  cJSON* root = cJSON_ParseWithLength(json.c_str(), json.size());
   if (!root) {
     ESP_LOGW(TAG, "Failed to parse observations JSON");
     return;
@@ -454,14 +468,14 @@ static std::string _wb_coalesce_string(cJSON* obj, const char* k1,
   return {};
 }
 
-void WeatherBOM::parse_and_publish_forecast_(const char* json) {
-  if (strlen(json) == 0) {
+void WeatherBOM::parse_and_publish_forecast_(const std::string& json) {
+  if (json.empty()) {
     ESP_LOGD(TAG, "No forecast JSON to parse");
     return;
   }
 
-  ESP_LOGD(TAG, "Parsing forecast JSON: %.100s...", json);
-  cJSON* root = cJSON_ParseWithLength(json, strlen(json));
+  ESP_LOGD(TAG, "Parsing forecast JSON: %.100s...", json.c_str());
+  cJSON* root = cJSON_ParseWithLength(json.c_str(), json.size());
   if (!root) {
     ESP_LOGW(TAG, "Failed to parse forecast JSON");
     return;
@@ -487,6 +501,7 @@ void WeatherBOM::parse_and_publish_forecast_(const char* json) {
       float rain_min = NAN;
       float rain_max = NAN;
       float rain_chance = NAN;
+      std::string sunrise, sunset;
       std::string summary = _wb_coalesce_string(day, "short_text", "summary");
       std::string icon = _wb_coalesce_string(day, "icon_descriptor", "icon");
 
@@ -502,6 +517,13 @@ void WeatherBOM::parse_and_publish_forecast_(const char* json) {
         }
       }
 
+      // Sunrise/Sunset
+      cJSON* astro = cJSON_GetObjectItemCaseSensitive(day, "astronomical");
+      if (astro) {
+        sunrise = _wb_coalesce_string(astro, "sunrise_time");
+        sunset = _wb_coalesce_string(astro, "sunset_time");
+      }
+
       // 2. Publish grouped style
       if (is_today) {
         if (!std::isnan(tmin) && this->today_min_)
@@ -515,6 +537,11 @@ void WeatherBOM::parse_and_publish_forecast_(const char* json) {
           this->today_rain_min_->publish_state(rain_min);
         if (!std::isnan(rain_max) && this->today_rain_max_)
           this->today_rain_max_->publish_state(rain_max);
+
+        if (!sunrise.empty() && this->today_sunrise_)
+          this->today_sunrise_->publish_state(sunrise);
+        if (!sunset.empty() && this->today_sunset_)
+          this->today_sunset_->publish_state(sunset);
 
         if (!summary.empty() && this->today_summary_)
           this->today_summary_->publish_state(summary);
@@ -534,6 +561,11 @@ void WeatherBOM::parse_and_publish_forecast_(const char* json) {
         if (!std::isnan(rain_max) && this->tomorrow_rain_max_)
           this->tomorrow_rain_max_->publish_state(rain_max);
 
+        if (!sunrise.empty() && this->tomorrow_sunrise_)
+          this->tomorrow_sunrise_->publish_state(sunrise);
+        if (!sunset.empty() && this->tomorrow_sunset_)
+          this->tomorrow_sunset_->publish_state(sunset);
+
         if (!summary.empty() && this->tomorrow_summary_)
           this->tomorrow_summary_->publish_state(summary);
         if (!icon.empty() && this->tomorrow_icon_)
@@ -550,16 +582,16 @@ void WeatherBOM::parse_and_publish_forecast_(const char* json) {
   cJSON_Delete(root);
 }
 
-void WeatherBOM::parse_and_publish_warnings_(const char* json) {
+void WeatherBOM::parse_and_publish_warnings_(const std::string& json) {
   if (!this->warnings_json_) return;
 
-  if (strlen(json) == 0) {
+  if (json.empty()) {
     this->warnings_json_->publish_state("[]");
     return;
   }
 
-  ESP_LOGD(TAG, "Parsing warnings JSON: %.100s...", json);
-  cJSON* root = cJSON_ParseWithLength(json, strlen(json));
+  ESP_LOGD(TAG, "Parsing warnings JSON: %.100s...", json.c_str());
+  cJSON* root = cJSON_ParseWithLength(json.c_str(), json.size());
   if (!root) {
     ESP_LOGW(TAG, "Failed to parse warnings JSON, publishing empty");
     this->warnings_json_->publish_state("[]");
