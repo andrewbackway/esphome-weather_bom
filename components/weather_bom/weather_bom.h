@@ -41,6 +41,12 @@ class WeatherBOM : public PollingComponent {
     today_summary_ = t;
   }
   void set_today_icon_text(text_sensor::TextSensor *t) { today_icon_ = t; }
+  void set_today_sunrise_text(text_sensor::TextSensor *s) {
+    today_sunrise_ = s;
+  }
+  void set_today_sunset_text(text_sensor::TextSensor *s) {
+    today_sunset_ = s;
+  }
 
   // Forecast tomorrow
   void set_tomorrow_min_sensor(sensor::Sensor *s) { tomorrow_min_ = s; }
@@ -59,6 +65,12 @@ class WeatherBOM : public PollingComponent {
   }
   void set_tomorrow_icon_text(text_sensor::TextSensor *t) {
     tomorrow_icon_ = t;
+  }
+  void set_tomorrow_sunrise_text(text_sensor::TextSensor *s) {
+    tomorrow_sunrise_ = s;
+  }
+  void set_tomorrow_sunset_text(text_sensor::TextSensor *s) {
+    tomorrow_sunset_ = s;
   }
 
   // Meta
@@ -105,6 +117,8 @@ class WeatherBOM : public PollingComponent {
   sensor::Sensor *today_rain_max_{nullptr};
   text_sensor::TextSensor *today_summary_{nullptr};
   text_sensor::TextSensor *today_icon_{nullptr};
+  text_sensor::TextSensor *today_sunrise_{nullptr};
+  text_sensor::TextSensor *today_sunset_{nullptr};
 
   // Tomorrow forecast
   sensor::Sensor *tomorrow_min_{nullptr};
@@ -114,6 +128,8 @@ class WeatherBOM : public PollingComponent {
   sensor::Sensor *tomorrow_rain_max_{nullptr};
   text_sensor::TextSensor *tomorrow_summary_{nullptr};
   text_sensor::TextSensor *tomorrow_icon_{nullptr};
+  text_sensor::TextSensor *tomorrow_sunrise_{nullptr};
+  text_sensor::TextSensor *tomorrow_sunset_{nullptr};
 
   // Meta
   text_sensor::TextSensor *warnings_json_{nullptr};
@@ -122,10 +138,10 @@ class WeatherBOM : public PollingComponent {
   text_sensor::TextSensor *last_update_{nullptr};
 
   bool resolve_geohash_if_needed_();
-  bool fetch_url_(const std::string &url, char *out, size_t max_len);
-  void parse_and_publish_observations_(const char *json);
-  void parse_and_publish_forecast_(const char *json);
-  void parse_and_publish_warnings_(const char *json);
+  bool fetch_url_(const std::string &url, std::string &out);
+  void parse_and_publish_observations_(const std::string &json);
+  void parse_and_publish_forecast_(const std::string &json);
+  void parse_and_publish_warnings_(const std::string &json);
   void publish_last_update_();
   void do_fetch();
 
