@@ -2,8 +2,10 @@
 
 #include <cmath>
 #include <ctime>
+#include <cstdlib>
+#include <string.h>
 
-#include "cJSON.h"
+#include "jsmn.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esphome/components/wifi/wifi_component.h"
@@ -16,6 +18,40 @@ namespace esphome {
 namespace weather_bom {
 
 static const char* const TAG = "weather_bom";
+
+static int find_key(const char* json, jsmntok_t* tokens, int num_tokens, int parent, const char* key) {
+  int key_len = strlen(key);
+  int i = parent + 1;
+  while (i < num_tokens && tokens[i].start < tokens[parent].end) {
+    if (tokens[i].type == JSMN_STRING && (tokens[i].end - tokens[i].start) == key_len &&
+        strncmp(json + tokens[i].start, key, key_len) == 0) {
+      return i + 1;
+    }
+    i += tokens[i].size + 1;
+  }
+  return -1;
+}
+
+static float _wb_coalesce_number(const char* json, jsmntok_t* tokens, int num_tokens, int parent, const char* k1, const char* k2 = nullptr) {
+  int tok = find_key(json, tokens, num_tokens, parent, k1);
+  if (tok < 0 && k2 != nullptr) {
+    tok = find_key(json, tokens, num_tokens, parent, k2);
+  }
+  if (tok < 0 || tokens[tok].type != JSMN_PRIMITIVE) return NAN;
+  char* endptr;
+  float val = strtof(json + tokens[tok].start, &endptr);
+  if (endptr != json + tokens[tok].end) return NAN;
+  return val;
+}
+
+static std::string _wb_coalesce_string(const char* json, jsmntok_t* tokens, int num_tokens, int parent, const char* k1, const char* k2 = nullptr) {
+  int tok = find_key(json, tokens, num_tokens, parent, k1);
+  if (tok < 0 && k2 != nullptr) {
+    tok = find_key(json, tokens, num_tokens, parent, k2);
+  }
+  if (tok < 0 || tokens[tok].type != JSMN_STRING) return "";
+  return std::string(json + tokens[tok].start, tokens[tok].end - tokens[tok].start);
+}
 
 void WeatherBOM::dump_config() {
   ESP_LOGCONFIG(TAG, "Weather BOM:");
@@ -70,7 +106,12 @@ void WeatherBOM::setup() {
     this->lat_sensor_->add_on_state_callback([this](float v) {
       this->dynamic_lat_ = v;
       this->have_dynamic_ = !std::isnan(v) && !std::isnan(this->dynamic_lon_);
-      if (this->have_dynamic_ && this->geohash_.empty()) this->update();
+      if (this->have_dynamic_) {
+        if (!this->geohash_.empty() && (fabs(v - this->last_lat_) > 0.01 || fabs(this->dynamic_lon_ - this->last_lon_) > 0.01)) {
+          this->geohash_ = "";
+        }
+        if (this->geohash_.empty()) this->update();
+      }
     });
   }
 
@@ -78,7 +119,12 @@ void WeatherBOM::setup() {
     this->lon_sensor_->add_on_state_callback([this](float v) {
       this->dynamic_lon_ = v;
       this->have_dynamic_ = !std::isnan(this->dynamic_lat_) && !std::isnan(v);
-      if (this->have_dynamic_ && this->geohash_.empty()) this->update();
+      if (this->have_dynamic_) {
+        if (!this->geohash_.empty() && (fabs(this->dynamic_lat_ - this->last_lat_) > 0.01 || fabs(v - this->last_lon_) > 0.01)) {
+          this->geohash_ = "";
+        }
+        if (this->geohash_.empty()) this->update();
+      }
     });
   }
 
@@ -101,6 +147,14 @@ void WeatherBOM::loop() {
 }
 
 void WeatherBOM::update() {
+  time_t now;
+  time(&now);
+  if (now - this->last_attempt < this->update_interval_sec) {
+    ESP_LOGD(TAG, "Update throttled, skipping...");
+    return;
+  }
+  this->last_attempt = now;
+
   if (this->running_) {
     ESP_LOGD(TAG, "Fetch already running, skipping...");
     return;
@@ -116,7 +170,7 @@ void WeatherBOM::update() {
 
   BaseType_t res = xTaskCreate(&WeatherBOM::fetch_task,  // Task function
                                "bom_fetch",              // Name
-                               6144,                     // Stack size (words)
+                               8192,                     // Stack size (words)
                                this,                     // Parameter
                                3,                        // Priority
                                nullptr);                 // Task handle
@@ -140,6 +194,7 @@ void WeatherBOM::do_fetch() {
   if (wifi::global_wifi_component == nullptr ||
       !wifi::global_wifi_component->is_connected()) {
     ESP_LOGW(TAG, "WiFi lost before fetch, aborting.");
+    this->update_interval_sec = 60;
     return;
   }
 
@@ -149,6 +204,7 @@ void WeatherBOM::do_fetch() {
   if (this->geohash_.empty()) {
     if (!this->resolve_geohash_if_needed_()) {
       ESP_LOGW(TAG, "Could not resolve geohash (need lat/lon)");
+      this->update_interval_sec = 60;
       return;
     }
   }
@@ -194,23 +250,35 @@ void WeatherBOM::do_fetch() {
   // 3) Warnings
   // ---------------------------------------------------------------------------
   {
-    std::string url = "https://api.weather.bom.gov.au/v1/locations/" +
-                      this->geohash_ + "/warnings";
+    if (this->fetch_warnings) {
+      std::string url = "https://api.weather.bom.gov.au/v1/locations/" +
+                        this->geohash_ + "/warnings";
 
-    ESP_LOGD(TAG, "Fetching warnings: %s", url.c_str());
-    if (this->fetch_url_(url, body)) {
-      this->parse_and_publish_warnings_(body);
-      success_any = true;
+      ESP_LOGD(TAG, "Fetching warnings: %s", url.c_str());
+      if (this->fetch_url_(url, body)) {
+        this->parse_and_publish_warnings_(body);
+        success_any = true;
+        this->warnings_skip_count = 0;
+      } else {
+        // If fetch fails, don't change fetch_warnings
+      }
+      body.clear();
+      std::string().swap(body);
+    } else {
+      this->warnings_skip_count++;
+      if (this->warnings_skip_count >= 5) {
+        this->fetch_warnings = true;
+        this->warnings_skip_count = 0;
+      }
     }
-
-    body.clear();
-    std::string().swap(body);
   }
 
   if (success_any) {
     this->publish_last_update_();
+    this->update_interval_sec = 900;
   } else {
     ESP_LOGW(TAG, "All BOM fetches failed");
+    this->update_interval_sec = 60;
   }
 }
 
@@ -249,54 +317,58 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
   ESP_LOGD(TAG, "Fetched %d bytes for geohash resolution: %.100s...",
            (int)resp.size(), resp.c_str());
 
-  cJSON* root = cJSON_ParseWithLength(resp.c_str(), resp.size());
-  if (!root) {
+  const char* json = resp.c_str();
+  jsmn_parser parser;
+  jsmn_init(&parser);
+  const int MAX_TOKENS = 64;
+  jsmntok_t tokens[MAX_TOKENS];
+  int num_tokens = jsmn_parse(&parser, json, resp.size(), tokens, MAX_TOKENS);
+  if (num_tokens < 0) {
     ESP_LOGW(TAG, "Failed to parse geohash JSON");
     return false;
   }
 
   bool ok = false;
-  cJSON* data = cJSON_GetObjectItemCaseSensitive(root, "data");
-  if (data && cJSON_IsArray(data) && cJSON_GetArraySize(data) > 0) {
-    cJSON* first = cJSON_GetArrayItem(data, 0);
-    cJSON* gh = cJSON_GetObjectItemCaseSensitive(first, "geohash");
-    cJSON* nm = cJSON_GetObjectItemCaseSensitive(first, "name");
+  int data_tok = find_key(json, tokens, num_tokens, 0, "data");
+  if (data_tok >= 0 && tokens[data_tok].type == JSMN_ARRAY && tokens[data_tok].size > 0) {
+    int first_tok = data_tok + 1;
+    if (tokens[first_tok].type == JSMN_OBJECT) {
+      int gh_tok = find_key(json, tokens, num_tokens, first_tok, "geohash");
+      if (gh_tok >= 0 && tokens[gh_tok].type == JSMN_STRING) {
+        std::string full_geohash = std::string(json + tokens[gh_tok].start, tokens[gh_tok].end - tokens[gh_tok].start);
 
-    if (cJSON_IsString(gh) && gh->valuestring != nullptr) {
-      std::string full_geohash = gh->valuestring;
+        // Truncate to first 6 chars for BOM compatibility
+        if (full_geohash.length() > 6) {
+          ESP_LOGW(TAG,
+                   "Geohash '%s' too long (%d). Truncating to '%s' for BOM API.",
+                   full_geohash.c_str(), (int)full_geohash.length(),
+                   full_geohash.substr(0, 6).c_str());
+          this->geohash_ = full_geohash.substr(0, 6);
+        } else {
+          this->geohash_ = full_geohash;
+        }
 
-      // Truncate to first 6 chars for BOM compatibility
-      if (full_geohash.length() > 6) {
-        ESP_LOGW(TAG,
-                 "Geohash '%s' too long (%d). Truncating to '%s' for BOM API.",
-                 full_geohash.c_str(), (int)full_geohash.length(),
-                 full_geohash.substr(0, 6).c_str());
-        this->geohash_ = full_geohash.substr(0, 6);
+        ok = true;
+        ESP_LOGD(TAG, "Using geohash: %s", this->geohash_.c_str());
+
+        if (this->out_geohash_) {
+          this->out_geohash_->publish_state(this->geohash_);
+        }
       } else {
-        this->geohash_ = full_geohash;
+        ESP_LOGW(TAG, "No geohash in response");
       }
 
-      ok = true;
-      ESP_LOGD(TAG, "Using geohash: %s", this->geohash_.c_str());
-
-      if (this->out_geohash_) {
-        this->out_geohash_->publish_state(this->geohash_);
+      // Publish location name only if available
+      int nm_tok = find_key(json, tokens, num_tokens, first_tok, "name");
+      if (nm_tok >= 0 && tokens[nm_tok].type == JSMN_STRING && this->location_name_) {
+        std::string name = std::string(json + tokens[nm_tok].start, tokens[nm_tok].end - tokens[nm_tok].start);
+        this->location_name_->publish_state(name);
+        ESP_LOGD(TAG, "Location name: %s", name.c_str());
       }
-    } else {
-      ESP_LOGW(TAG, "No geohash in response");
     }
-
-    // Publish location name only if available
-    if (cJSON_IsString(nm) && nm->valuestring && this->location_name_) {
-      this->location_name_->publish_state(nm->valuestring);
-      ESP_LOGD(TAG, "Location name: %s", nm->valuestring);
-    }
-
   } else {
     ESP_LOGW(TAG, "No 'data' array or response was empty");
   }
-
-  cJSON_Delete(root);
 
   if (ok) {
     // Track the lat/lon used for this geohash to detect changes later
@@ -309,7 +381,7 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
 }
 
 bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
-  // Keep BOM payloads small; cap at 8 KB to bound memory.
+  // Keep BOM payloads small; cap at 32 KB to bound memory.
   static constexpr size_t MAX_HTTP_BODY = 8192;
 
   esp_http_client_config_t cfg = {};
@@ -318,7 +390,7 @@ bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
   cfg.transport_type = HTTP_TRANSPORT_OVER_SSL;
   cfg.crt_bundle_attach = esp_crt_bundle_attach;
   cfg.buffer_size = 4096;
-  cfg.buffer_size_tx = 1024;
+  cfg.buffer_size_tx = 2048;
 
   esp_http_client_handle_t client = esp_http_client_init(&cfg);
   if (!client) {
@@ -395,229 +467,225 @@ bool WeatherBOM::fetch_url_(const std::string& url, std::string& out) {
   return success;
 }
 
-void WeatherBOM::parse_and_publish_observations_(const std::string& json) {
-  ESP_LOGD(TAG, "Parsing observations JSON: %.100s...", json.c_str());
+void WeatherBOM::parse_and_publish_observations_(const std::string& json_str) {
+  if (json_str.empty()) {
+    ESP_LOGD(TAG, "No observations JSON to parse");
+    return;
+  }
 
-  cJSON* root = cJSON_ParseWithLength(json.c_str(), json.size());
-  if (!root) {
+  ESP_LOGD(TAG, "Parsing observations JSON: %.100s...", json_str.c_str());
+  const char* json = json_str.c_str();
+  jsmn_parser parser;
+  jsmn_init(&parser);
+  const int MAX_TOKENS = 128;
+  jsmntok_t tokens[MAX_TOKENS];
+  int num_tokens = jsmn_parse(&parser, json, json_str.size(), tokens, MAX_TOKENS);
+  if (num_tokens < 0) {
     ESP_LOGW(TAG, "Failed to parse observations JSON");
     return;
   }
 
-  cJSON* data = cJSON_GetObjectItemCaseSensitive(root, "data");
-  if (cJSON_IsObject(data)) {
-    // Temperature
-    cJSON* temp = cJSON_GetObjectItemCaseSensitive(data, "temp");
-    if (cJSON_IsNumber(temp)) {
-      float val = (float)temp->valuedouble;
-      ESP_LOGD(TAG, "Temperature: %f", val);
-      if (this->temperature_) this->temperature_->publish_state(val);
-    }
-
-    // Rain since 9 AM
-    cJSON* rain = cJSON_GetObjectItemCaseSensitive(data, "rain_since_9am");
-    if (cJSON_IsNumber(rain)) {
-      float val = (float)rain->valuedouble;
-      ESP_LOGD(TAG, "Rain since 9AM: %f", val);
-      if (this->rain_since_9am_) this->rain_since_9am_->publish_state(val);
-    }
-
-    // Humidity
-    cJSON* hum = cJSON_GetObjectItemCaseSensitive(data, "humidity");
-    if (cJSON_IsNumber(hum)) {
-      float val = (float)hum->valuedouble;
-      if (this->humidity_) this->humidity_->publish_state(val);
-    }
-
-    // Wind data
-    float wind_val = NAN;
-    cJSON* wind = cJSON_GetObjectItemCaseSensitive(data, "wind");
-    if (cJSON_IsObject(wind)) {
-      cJSON* kmh = cJSON_GetObjectItemCaseSensitive(wind, "speed_kilometre");
-      if (cJSON_IsNumber(kmh)) wind_val = (float)kmh->valuedouble;
-    }
-    if (!std::isnan(wind_val) && this->wind_kmh_)
-      this->wind_kmh_->publish_state(wind_val);
+  int data_tok = find_key(json, tokens, num_tokens, 0, "data");
+  if (data_tok < 0 || tokens[data_tok].type != JSMN_OBJECT) {
+    ESP_LOGW(TAG, "No valid 'data' object in observations");
+    return;
   }
 
-  cJSON_Delete(root);
-}
-
-// file-local helpers for forecast parsing
-static float _wb_coalesce_number(cJSON* obj, const char* k1,
-                                 const char* k2 = nullptr) {
-  if (!obj) return NAN;
-  cJSON* v = cJSON_GetObjectItemCaseSensitive(obj, k1);
-  if (cJSON_IsNumber(v)) return (float)v->valuedouble;
-  if (k2 != nullptr) {
-    v = cJSON_GetObjectItemCaseSensitive(obj, k2);
-    if (cJSON_IsNumber(v)) return (float)v->valuedouble;
+  float temp_val = _wb_coalesce_number(json, tokens, num_tokens, data_tok, "temp");
+  if (!std::isnan(temp_val) && this->temperature_) {
+    ESP_LOGD(TAG, "Temperature: %f", temp_val);
+    this->temperature_->publish_state(temp_val);
   }
-  return NAN;
-}
 
-static std::string _wb_coalesce_string(cJSON* obj, const char* k1,
-                                       const char* k2 = nullptr) {
-  if (!obj) return {};
-  cJSON* v = cJSON_GetObjectItemCaseSensitive(obj, k1);
-  if (cJSON_IsString(v) && v->valuestring) return std::string(v->valuestring);
-  if (k2 != nullptr) {
-    v = cJSON_GetObjectItemCaseSensitive(obj, k2);
-    if (cJSON_IsString(v) && v->valuestring) return std::string(v->valuestring);
+  float rain_val = _wb_coalesce_number(json, tokens, num_tokens, data_tok, "rain_since_9am");
+  if (!std::isnan(rain_val) && this->rain_since_9am_) {
+    ESP_LOGD(TAG, "Rain since 9AM: %f", rain_val);
+    this->rain_since_9am_->publish_state(rain_val);
   }
-  return {};
+
+  float hum_val = _wb_coalesce_number(json, tokens, num_tokens, data_tok, "humidity");
+  if (!std::isnan(hum_val) && this->humidity_) {
+    this->humidity_->publish_state(hum_val);
+  }
+
+  float wind_val = NAN;
+  int wind_tok = find_key(json, tokens, num_tokens, data_tok, "wind");
+  if (wind_tok >= 0 && tokens[wind_tok].type == JSMN_OBJECT) {
+    wind_val = _wb_coalesce_number(json, tokens, num_tokens, wind_tok, "speed_kilometre");
+  }
+  if (!std::isnan(wind_val) && this->wind_kmh_) {
+    this->wind_kmh_->publish_state(wind_val);
+  }
 }
 
-void WeatherBOM::parse_and_publish_forecast_(const std::string& json) {
-  if (json.empty()) {
+void WeatherBOM::parse_and_publish_forecast_(const std::string& json_str) {
+  if (json_str.empty()) {
     ESP_LOGD(TAG, "No forecast JSON to parse");
     return;
   }
 
-  ESP_LOGD(TAG, "Parsing forecast JSON: %.100s...", json.c_str());
-  cJSON* root = cJSON_ParseWithLength(json.c_str(), json.size());
-  if (!root) {
+  ESP_LOGD(TAG, "Parsing forecast JSON: %.100s...", json_str.c_str());
+  const char* json = json_str.c_str();
+  jsmn_parser parser;
+  jsmn_init(&parser);
+  const int MAX_TOKENS = 512;
+  jsmntok_t tokens[MAX_TOKENS];
+  int num_tokens = jsmn_parse(&parser, json, json_str.size(), tokens, MAX_TOKENS);
+  if (num_tokens < 0) {
     ESP_LOGW(TAG, "Failed to parse forecast JSON");
     return;
   }
 
-  cJSON* arr = cJSON_GetObjectItemCaseSensitive(root, "data");
-  if (!cJSON_IsArray(arr)) {
-    arr = cJSON_GetObjectItemCaseSensitive(root, "forecast");
-    if (cJSON_IsArray(arr)) ESP_LOGD(TAG, "Using 'forecast' instead of 'data'");
+  int arr_tok = find_key(json, tokens, num_tokens, 0, "data");
+  if (arr_tok < 0) {
+    arr_tok = find_key(json, tokens, num_tokens, 0, "forecast");
+    if (arr_tok >= 0) ESP_LOGD(TAG, "Using 'forecast' instead of 'data'");
   }
 
-  if (cJSON_IsArray(arr)) {
-    cJSON* day0 = cJSON_GetArrayItem(arr, 0);
-    cJSON* day1 = cJSON_GetArrayItem(arr, 1);
-
-    auto handle_day = [&](cJSON* day, bool is_today) {
-      if (!day) return;
-
-      // 1. Extract values into variables first
-      float tmin = _wb_coalesce_number(day, "temp_min", "temperature_min");
-      float tmax = _wb_coalesce_number(day, "temp_max", "temperature_max");
-
-      float rain_min = NAN;
-      float rain_max = NAN;
-      float rain_chance = NAN;
-      std::string sunrise, sunset;
-      std::string summary = _wb_coalesce_string(day, "short_text", "summary");
-      std::string icon = _wb_coalesce_string(day, "icon_descriptor", "icon");
-
-      // Rain values
-      cJSON* rain = cJSON_GetObjectItemCaseSensitive(day, "rain");
-      if (rain) {
-        rain_chance = _wb_coalesce_number(rain, "chance");
-
-        cJSON* amount = cJSON_GetObjectItemCaseSensitive(rain, "amount");
-        if (amount) {
-          rain_min = _wb_coalesce_number(amount, "min");
-          rain_max = _wb_coalesce_number(amount, "max");
-        }
-      }
-
-      // Sunrise/Sunset
-      cJSON* astro = cJSON_GetObjectItemCaseSensitive(day, "astronomical");
-      if (astro) {
-        sunrise = _wb_coalesce_string(astro, "sunrise_time");
-        sunset = _wb_coalesce_string(astro, "sunset_time");
-      }
-
-      // 2. Publish grouped style
-      if (is_today) {
-        if (!std::isnan(tmin) && this->today_min_)
-          this->today_min_->publish_state(tmin);
-        if (!std::isnan(tmax) && this->today_max_)
-          this->today_max_->publish_state(tmax);
-
-        if (!std::isnan(rain_chance) && this->today_rain_chance_)
-          this->today_rain_chance_->publish_state(rain_chance);
-        if (!std::isnan(rain_min) && this->today_rain_min_)
-          this->today_rain_min_->publish_state(rain_min);
-        if (!std::isnan(rain_max) && this->today_rain_max_)
-          this->today_rain_max_->publish_state(rain_max);
-
-        if (!sunrise.empty() && this->today_sunrise_)
-          this->today_sunrise_->publish_state(sunrise);
-        if (!sunset.empty() && this->today_sunset_)
-          this->today_sunset_->publish_state(sunset);
-
-        if (!summary.empty() && this->today_summary_)
-          this->today_summary_->publish_state(summary);
-        if (!icon.empty() && this->today_icon_)
-          this->today_icon_->publish_state(icon);
-
-      } else {
-        if (!std::isnan(tmin) && this->tomorrow_min_)
-          this->tomorrow_min_->publish_state(tmin);
-        if (!std::isnan(tmax) && this->tomorrow_max_)
-          this->tomorrow_max_->publish_state(tmax);
-
-        if (!std::isnan(rain_chance) && this->tomorrow_rain_chance_)
-          this->tomorrow_rain_chance_->publish_state(rain_chance);
-        if (!std::isnan(rain_min) && this->tomorrow_rain_min_)
-          this->tomorrow_rain_min_->publish_state(rain_min);
-        if (!std::isnan(rain_max) && this->tomorrow_rain_max_)
-          this->tomorrow_rain_max_->publish_state(rain_max);
-
-        if (!sunrise.empty() && this->tomorrow_sunrise_)
-          this->tomorrow_sunrise_->publish_state(sunrise);
-        if (!sunset.empty() && this->tomorrow_sunset_)
-          this->tomorrow_sunset_->publish_state(sunset);
-
-        if (!summary.empty() && this->tomorrow_summary_)
-          this->tomorrow_summary_->publish_state(summary);
-        if (!icon.empty() && this->tomorrow_icon_)
-          this->tomorrow_icon_->publish_state(icon);
-      }
-    };
-
-    handle_day(day0, true);
-    handle_day(day1, false);
-  } else {
+  if (arr_tok < 0 || tokens[arr_tok].type != JSMN_ARRAY) {
     ESP_LOGW(TAG, "No forecast array found");
+    return;
   }
 
-  cJSON_Delete(root);
+  auto handle_day = [&](int day_tok, bool is_today) {
+    if (day_tok < 0 || tokens[day_tok].type != JSMN_OBJECT) return;
+
+    // 1. Extract values into variables first
+    float tmin = _wb_coalesce_number(json, tokens, num_tokens, day_tok, "temp_min", "temperature_min");
+    float tmax = _wb_coalesce_number(json, tokens, num_tokens, day_tok, "temp_max", "temperature_max");
+
+    float rain_min = NAN;
+    float rain_max = NAN;
+    float rain_chance = NAN;
+    std::string sunrise, sunset;
+    std::string summary = _wb_coalesce_string(json, tokens, num_tokens, day_tok, "short_text", "summary");
+    std::string icon = _wb_coalesce_string(json, tokens, num_tokens, day_tok, "icon_descriptor", "icon");
+
+    // Rain values
+    int rain_tok = find_key(json, tokens, num_tokens, day_tok, "rain");
+    if (rain_tok >= 0 && tokens[rain_tok].type == JSMN_OBJECT) {
+      rain_chance = _wb_coalesce_number(json, tokens, num_tokens, rain_tok, "chance");
+
+      int amount_tok = find_key(json, tokens, num_tokens, rain_tok, "amount");
+      if (amount_tok >= 0 && tokens[amount_tok].type == JSMN_OBJECT) {
+        rain_min = _wb_coalesce_number(json, tokens, num_tokens, amount_tok, "min");
+        rain_max = _wb_coalesce_number(json, tokens, num_tokens, amount_tok, "max");
+      }
+    }
+
+    // Sunrise/Sunset
+    int astro_tok = find_key(json, tokens, num_tokens, day_tok, "astronomical");
+    if (astro_tok >= 0 && tokens[astro_tok].type == JSMN_OBJECT) {
+      sunrise = _wb_coalesce_string(json, tokens, num_tokens, astro_tok, "sunrise_time");
+      sunset = _wb_coalesce_string(json, tokens, num_tokens, astro_tok, "sunset_time");
+    }
+
+    // 2. Publish grouped style
+    if (is_today) {
+      if (!std::isnan(tmin) && this->today_min_)
+        this->today_min_->publish_state(tmin);
+      if (!std::isnan(tmax) && this->today_max_)
+        this->today_max_->publish_state(tmax);
+
+      if (!std::isnan(rain_chance) && this->today_rain_chance_)
+        this->today_rain_chance_->publish_state(rain_chance);
+      if (!std::isnan(rain_min) && this->today_rain_min_)
+        this->today_rain_min_->publish_state(rain_min);
+      if (!std::isnan(rain_max) && this->today_rain_max_)
+        this->today_rain_max_->publish_state(rain_max);
+
+      if (!sunrise.empty() && this->today_sunrise_)
+        this->today_sunrise_->publish_state(sunrise);
+      if (!sunset.empty() && this->today_sunset_)
+        this->today_sunset_->publish_state(sunset);
+
+      if (!summary.empty() && this->today_summary_)
+        this->today_summary_->publish_state(summary);
+      if (!icon.empty() && this->today_icon_)
+        this->today_icon_->publish_state(icon);
+
+    } else {
+      if (!std::isnan(tmin) && this->tomorrow_min_)
+        this->tomorrow_min_->publish_state(tmin);
+      if (!std::isnan(tmax) && this->tomorrow_max_)
+        this->tomorrow_max_->publish_state(tmax);
+
+      if (!std::isnan(rain_chance) && this->tomorrow_rain_chance_)
+        this->tomorrow_rain_chance_->publish_state(rain_chance);
+      if (!std::isnan(rain_min) && this->tomorrow_rain_min_)
+        this->tomorrow_rain_min_->publish_state(rain_min);
+      if (!std::isnan(rain_max) && this->tomorrow_rain_max_)
+        this->tomorrow_rain_max_->publish_state(rain_max);
+
+      if (!sunrise.empty() && this->tomorrow_sunrise_)
+        this->tomorrow_sunrise_->publish_state(sunrise);
+      if (!sunset.empty() && this->tomorrow_sunset_)
+        this->tomorrow_sunset_->publish_state(sunset);
+
+      if (!summary.empty() && this->tomorrow_summary_)
+        this->tomorrow_summary_->publish_state(summary);
+      if (!icon.empty() && this->tomorrow_icon_)
+        this->tomorrow_icon_->publish_state(icon);
+    }
+  };
+
+  int i = arr_tok + 1;
+  int day0_tok = -1;
+  if (i < num_tokens) {
+    day0_tok = i;
+    i += tokens[i].size + 1;
+  }
+  int day1_tok = -1;
+  if (i < num_tokens) {
+    day1_tok = i;
+  }
+
+  handle_day(day0_tok, true);
+  handle_day(day1_tok, false);
 }
 
-void WeatherBOM::parse_and_publish_warnings_(const std::string& json) {
+void WeatherBOM::parse_and_publish_warnings_(const std::string& json_str) {
   if (!this->warnings_json_) return;
 
-  if (json.empty()) {
+  if (json_str.empty()) {
     this->warnings_json_->publish_state("[]");
     return;
   }
 
-  ESP_LOGD(TAG, "Parsing warnings JSON: %.100s...", json.c_str());
-  cJSON* root = cJSON_ParseWithLength(json.c_str(), json.size());
-  if (!root) {
+  ESP_LOGD(TAG, "Parsing warnings JSON: %.100s...", json_str.c_str());
+  const char* json = json_str.c_str();
+  jsmn_parser parser;
+  jsmn_init(&parser);
+  const int MAX_TOKENS = 256;
+  jsmntok_t tokens[MAX_TOKENS];
+  int num_tokens = jsmn_parse(&parser, json, json_str.size(), tokens, MAX_TOKENS);
+  if (num_tokens < 0) {
     ESP_LOGW(TAG, "Failed to parse warnings JSON, publishing empty");
     this->warnings_json_->publish_state("[]");
     return;
   }
 
-  cJSON* data = cJSON_GetObjectItemCaseSensitive(root, "data");
-  cJSON* to_emit = data ? data : root;
-
-  static constexpr size_t MAX_WARNINGS_JSON = 2048;
-
-  char* printed = cJSON_PrintUnformatted(to_emit);
-  if (printed) {
-    size_t len = strlen(printed);
-    if (len > MAX_WARNINGS_JSON) {
-      ESP_LOGW(TAG, "Warnings JSON %u bytes > %u, truncating for publish",
-               (unsigned)len, (unsigned)MAX_WARNINGS_JSON);
-      printed[MAX_WARNINGS_JSON] = '\0';
-    }
-    this->warnings_json_->publish_state(printed);
-    cJSON_free(printed);
-  } else {
-    this->warnings_json_->publish_state("[]");
+  int data_tok = find_key(json, tokens, num_tokens, 0, "data");
+  if (data_tok < 0) {
+    data_tok = 0;  // fallback to root if no 'data'
   }
 
-  cJSON_Delete(root);
+  std::string warnings_json;
+  if (tokens[data_tok].type == JSMN_ARRAY && tokens[data_tok].size == 0) {
+    warnings_json = "[]";
+    this->fetch_warnings = false;
+  } else {
+    warnings_json = std::string(json + tokens[data_tok].start, tokens[data_tok].end - tokens[data_tok].start);
+    this->fetch_warnings = true;
+  }
+
+  static constexpr size_t MAX_WARNINGS_JSON = 2048;
+  if (warnings_json.length() > MAX_WARNINGS_JSON) {
+    ESP_LOGW(TAG, "Warnings JSON %u bytes > %u, truncating for publish",
+             (unsigned)warnings_json.length(), (unsigned)MAX_WARNINGS_JSON);
+    warnings_json = warnings_json.substr(0, MAX_WARNINGS_JSON);
+  }
+  this->warnings_json_->publish_state(warnings_json);
 }
 
 void WeatherBOM::publish_last_update_() {
