@@ -43,8 +43,6 @@ void WeatherBOM::dump_config() {
   LOG_SENSOR("  ", "Today Rain Max", this->today_rain_max_);
   LOG_TEXT_SENSOR("  ", "Today Summary", this->today_summary_);
   LOG_TEXT_SENSOR("  ", "Today Icon", this->today_icon_);
-  LOG_TEXT_SENSOR("  ", "Today Sunrise", this->today_sunrise_);
-  LOG_TEXT_SENSOR("  ", "Today Sunset", this->today_sunset_);
 
   LOG_SENSOR("  ", "Tomorrow Min", this->tomorrow_min_);
   LOG_SENSOR("  ", "Tomorrow Max", this->tomorrow_max_);
@@ -53,8 +51,6 @@ void WeatherBOM::dump_config() {
   LOG_SENSOR("  ", "Tomorrow Rain Max", this->tomorrow_rain_max_);
   LOG_TEXT_SENSOR("  ", "Tomorrow Summary", this->tomorrow_summary_);
   LOG_TEXT_SENSOR("  ", "Tomorrow Icon", this->tomorrow_icon_);
-  LOG_TEXT_SENSOR("  ", "Tomorrow Sunrise", this->tomorrow_sunrise_);
-  LOG_TEXT_SENSOR("  ", "Tomorrow Sunset", this->tomorrow_sunset_);
 
   LOG_TEXT_SENSOR("  ", "Warnings JSON", this->warnings_json_);
   LOG_TEXT_SENSOR("  ", "Location Name", this->location_name_);
@@ -150,7 +146,7 @@ void WeatherBOM::do_fetch() {
     if (!this->resolve_geohash_if_needed_()) {
       ESP_LOGW(TAG, "Could not resolve geohash (need lat/lon)");
       return;
-    }
+  }
   }
 
   char body[32769];  // 32KB + 1 for null
@@ -232,7 +228,7 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
   ESP_LOGD(TAG, "Resolving geohash with URL: %s", q);
 
   char resp[32769];  // Same buffer size
-  if (!this->fetch_url_(q, resp, sizeof(resp) - 1)) {
+  if (!this->fetch_url_(std::string(q), resp, sizeof(resp) - 1)) {
     ESP_LOGW(TAG, "Failed to fetch geohash resolution response");
     return false;
   }
@@ -299,8 +295,9 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
 }
 
 bool WeatherBOM::fetch_url_(const std::string& url, char* out, size_t max_len) {
-  // Keep BOM payloads small; cap at 32 KB to bound memory.
   static constexpr size_t MAX_HTTP_BODY = 32768;
+
+  if (max_len > MAX_HTTP_BODY) max_len = MAX_HTTP_BODY;
 
   esp_http_client_config_t cfg = {};
   cfg.url = url.c_str();
@@ -308,7 +305,7 @@ bool WeatherBOM::fetch_url_(const std::string& url, char* out, size_t max_len) {
   cfg.transport_type = HTTP_TRANSPORT_OVER_SSL;
   cfg.crt_bundle_attach = esp_crt_bundle_attach;
   cfg.buffer_size = 4096;
-  cfg.buffer_size_tx = 2048;
+  cfg.buffer_size_tx = 1024;
 
   esp_http_client_handle_t client = esp_http_client_init(&cfg);
   if (!client) {
@@ -344,9 +341,9 @@ bool WeatherBOM::fetch_url_(const std::string& url, char* out, size_t max_len) {
   }
 
   // If server claims a huge body, don't even try.
-  if (content_length > 0 && content_length > (int)MAX_HTTP_BODY) {
-    ESP_LOGW(TAG, "Content-Length %d > MAX_HTTP_BODY (%d) for %s, skipping",
-             content_length, (int)MAX_HTTP_BODY, url.c_str());
+  if (content_length > 0 && content_length > (int)max_len) {
+    ESP_LOGW(TAG, "Content-Length %d > max_len (%d) for %s, skipping",
+             content_length, (int)max_len, url.c_str());
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
     return false;
@@ -490,7 +487,6 @@ void WeatherBOM::parse_and_publish_forecast_(const char* json) {
       float rain_min = NAN;
       float rain_max = NAN;
       float rain_chance = NAN;
-      std::string sunrise, sunset;
       std::string summary = _wb_coalesce_string(day, "short_text", "summary");
       std::string icon = _wb_coalesce_string(day, "icon_descriptor", "icon");
 
@@ -506,13 +502,6 @@ void WeatherBOM::parse_and_publish_forecast_(const char* json) {
         }
       }
 
-      // Sunrise/Sunset
-      cJSON* astro = cJSON_GetObjectItemCaseSensitive(day, "astronomical");
-      if (astro) {
-        sunrise = _wb_coalesce_string(astro, "sunrise_time");
-        sunset = _wb_coalesce_string(astro, "sunset_time");
-      }
-
       // 2. Publish grouped style
       if (is_today) {
         if (!std::isnan(tmin) && this->today_min_)
@@ -526,11 +515,6 @@ void WeatherBOM::parse_and_publish_forecast_(const char* json) {
           this->today_rain_min_->publish_state(rain_min);
         if (!std::isnan(rain_max) && this->today_rain_max_)
           this->today_rain_max_->publish_state(rain_max);
-
-        if (!sunrise.empty() && this->today_sunrise_)
-          this->today_sunrise_->publish_state(sunrise);
-        if (!sunset.empty() && this->today_sunset_)
-          this->today_sunset_->publish_state(sunset);
 
         if (!summary.empty() && this->today_summary_)
           this->today_summary_->publish_state(summary);
@@ -549,11 +533,6 @@ void WeatherBOM::parse_and_publish_forecast_(const char* json) {
           this->tomorrow_rain_min_->publish_state(rain_min);
         if (!std::isnan(rain_max) && this->tomorrow_rain_max_)
           this->tomorrow_rain_max_->publish_state(rain_max);
-
-        if (!sunrise.empty() && this->tomorrow_sunrise_)
-          this->tomorrow_sunrise_->publish_state(sunrise);
-        if (!sunset.empty() && this->tomorrow_sunset_)
-          this->tomorrow_sunset_->publish_state(sunset);
 
         if (!summary.empty() && this->tomorrow_summary_)
           this->tomorrow_summary_->publish_state(summary);
