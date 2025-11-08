@@ -104,10 +104,6 @@ weather_bom:
     name: "Today's Rain Min"
   today_rain_max:
     name: "Today's Rain Max"
-  today_sunrise:
-    name: "Today's Sunrise"
-  today_sunset:
-    name: "Today's Sunset"
     
   tomorrow_min:
     name: "Weather Tomorrow Min Temp"
@@ -123,11 +119,6 @@ weather_bom:
     name: "Tomorrow Rain Min"
   tomorrow_rain_max:
     name: "Tomorrow Rain Max"
-  tomorrow_sunrise:
-    name: "Tomorrow Sunrise"
-  tomorrow_sunset:
-    name: "Tomorrow Sunset"
-
 
   warnings_json:
     name: "Weather Warnings (JSON)"

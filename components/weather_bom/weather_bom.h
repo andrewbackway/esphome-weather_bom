@@ -41,12 +41,6 @@ class WeatherBOM : public PollingComponent {
     today_summary_ = t;
   }
   void set_today_icon_text(text_sensor::TextSensor *t) { today_icon_ = t; }
-  void set_today_sunrise_text(text_sensor::TextSensor *s) {
-    today_sunrise_ = s;
-  }
-  void set_today_sunset_text(text_sensor::TextSensor *s) {
-    today_sunset_ = s;
-  }
 
   // Forecast tomorrow
   void set_tomorrow_min_sensor(sensor::Sensor *s) { tomorrow_min_ = s; }
@@ -65,12 +59,6 @@ class WeatherBOM : public PollingComponent {
   }
   void set_tomorrow_icon_text(text_sensor::TextSensor *t) {
     tomorrow_icon_ = t;
-  }
-  void set_tomorrow_sunrise_text(text_sensor::TextSensor *s) {
-    tomorrow_sunrise_ = s;
-  }
-  void set_tomorrow_sunset_text(text_sensor::TextSensor *s) {
-    tomorrow_sunset_ = s;
   }
 
   // Meta
@@ -117,8 +105,6 @@ class WeatherBOM : public PollingComponent {
   sensor::Sensor *today_rain_max_{nullptr};
   text_sensor::TextSensor *today_summary_{nullptr};
   text_sensor::TextSensor *today_icon_{nullptr};
-  text_sensor::TextSensor *today_sunrise_{nullptr};
-  text_sensor::TextSensor *today_sunset_{nullptr};
 
   // Tomorrow forecast
   sensor::Sensor *tomorrow_min_{nullptr};
@@ -128,8 +114,6 @@ class WeatherBOM : public PollingComponent {
   sensor::Sensor *tomorrow_rain_max_{nullptr};
   text_sensor::TextSensor *tomorrow_summary_{nullptr};
   text_sensor::TextSensor *tomorrow_icon_{nullptr};
-  text_sensor::TextSensor *tomorrow_sunrise_{nullptr};
-  text_sensor::TextSensor *tomorrow_sunset_{nullptr};
 
   // Meta
   text_sensor::TextSensor *warnings_json_{nullptr};
