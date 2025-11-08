@@ -122,10 +122,10 @@ class WeatherBOM : public PollingComponent {
   text_sensor::TextSensor *last_update_{nullptr};
 
   bool resolve_geohash_if_needed_();
-  bool fetch_url_(const std::string &url, std::string &out);
-  void parse_and_publish_observations_(const std::string &json);
-  void parse_and_publish_forecast_(const std::string &json);
-  void parse_and_publish_warnings_(const std::string &json);
+  bool fetch_url_(const std::string &url, char *out, size_t max_len);
+  void parse_and_publish_observations_(const char *json);
+  void parse_and_publish_forecast_(const char *json);
+  void parse_and_publish_warnings_(const char *json);
   void publish_last_update_();
   void do_fetch();
 
