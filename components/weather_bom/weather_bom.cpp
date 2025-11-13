@@ -2,10 +2,12 @@
 
 #include <cmath>
 #include <ctime>
+#include <cstring>
 
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
+#include "esp_system.h"
 #include "esphome/components/wifi/wifi_component.h"
 #include "esphome/core/application.h"
 #include "esphome/core/log.h"
@@ -21,8 +23,8 @@ void WeatherBOM::dump_config() {
   ESP_LOGCONFIG(TAG, "Weather BOM:");
   LOG_UPDATE_INTERVAL(this);
 
-  if (!this->geohash_.empty()) {
-    ESP_LOGCONFIG(TAG, "  Geohash: %s", this->geohash_.c_str());
+  if (strlen(this->geohash_) > 0) {
+    ESP_LOGCONFIG(TAG, "  Geohash: %s", this->geohash_);
   } else if (this->have_static_lat_ && this->have_static_lon_) {
     ESP_LOGCONFIG(TAG, "  Static Latitude: %.6f", this->static_lat_);
     ESP_LOGCONFIG(TAG, "  Static Longitude: %.6f", this->static_lon_);
@@ -73,7 +75,7 @@ void WeatherBOM::setup() {
     this->lat_sensor_->add_on_state_callback([this](float v) {
       this->dynamic_lat_ = v;
       this->have_dynamic_ = !std::isnan(v) && !std::isnan(this->dynamic_lon_);
-      if (this->have_dynamic_ && this->geohash_.empty()) this->update();
+      if (this->have_dynamic_ && strlen(this->geohash_) == 0) this->update();
     });
   }
 
@@ -81,12 +83,12 @@ void WeatherBOM::setup() {
     this->lon_sensor_->add_on_state_callback([this](float v) {
       this->dynamic_lon_ = v;
       this->have_dynamic_ = !std::isnan(this->dynamic_lat_) && !std::isnan(v);
-      if (this->have_dynamic_ && this->geohash_.empty()) this->update();
+      if (this->have_dynamic_ && strlen(this->geohash_) == 0) this->update();
     });
   }
 
   // Publish static geohash (if configured at startup)
-  if (!this->geohash_.empty() && this->out_geohash_) {
+  if (strlen(this->geohash_) > 0 && this->out_geohash_) {
     this->out_geohash_->publish_state(this->geohash_);
   }
 }
@@ -140,6 +142,8 @@ void WeatherBOM::fetch_task(void* pv) {
 
 // Main fetch routine: fetch -> process -> free, for each endpoint in turn
 void WeatherBOM::do_fetch() {
+  ESP_LOGD(TAG, "Heap before do_fetch: %u bytes", esp_get_free_heap_size());
+
   if (wifi::global_wifi_component == nullptr ||
       !wifi::global_wifi_component->is_connected()) {
     ESP_LOGW(TAG, "WiFi lost before fetch, aborting.");
@@ -149,25 +153,25 @@ void WeatherBOM::do_fetch() {
   bool success_any = false;
 
   // Resolve geohash first if needed
-  if (this->geohash_.empty()) {
+  if (strlen(this->geohash_) == 0) {
     if (!this->resolve_geohash_if_needed_()) {
       ESP_LOGW(TAG, "Could not resolve geohash (need lat/lon)");
       return;
     }
   }
 
-  char body[32769];  // 32KB + 1 for null
-
   // ---------------------------------------------------------------------------
   // 1) Observations
   // ---------------------------------------------------------------------------
   if (this->enable_observations_) {
-    std::string url = "https://api.weather.bom.gov.au/v1/locations/" +
-                      this->geohash_ + "/observations";
+    snprintf(this->url_buffer_, sizeof(this->url_buffer_),
+             "https://api.weather.bom.gov.au/v1/locations/%s/observations",
+             this->geohash_);
 
-    ESP_LOGD(TAG, "Fetching observations: %s", url.c_str());
-    if (this->fetch_url_(url, body, sizeof(body) - 1)) {
-      this->parse_and_publish_observations_(body);
+    ESP_LOGD(TAG, "Fetching observations: %s", this->url_buffer_);
+    if (this->fetch_url_(this->url_buffer_, this->shared_buffer_,
+                         sizeof(this->shared_buffer_) - 1)) {
+      this->parse_and_publish_observations_(this->shared_buffer_);
       success_any = true;
     }
   }
@@ -176,12 +180,14 @@ void WeatherBOM::do_fetch() {
   // 2) Daily forecast
   // ---------------------------------------------------------------------------
   if (this->enable_forecast_) {
-    std::string url = "https://api.weather.bom.gov.au/v1/locations/" +
-                      this->geohash_ + "/forecasts/daily";
+    snprintf(this->url_buffer_, sizeof(this->url_buffer_),
+             "https://api.weather.bom.gov.au/v1/locations/%s/forecasts/daily",
+             this->geohash_);
 
-    ESP_LOGD(TAG, "Fetching forecast: %s", url.c_str());
-    if (this->fetch_url_(url, body, sizeof(body) - 1)) {
-      this->parse_and_publish_forecast_(body);
+    ESP_LOGD(TAG, "Fetching forecast: %s", this->url_buffer_);
+    if (this->fetch_url_(this->url_buffer_, this->shared_buffer_,
+                         sizeof(this->shared_buffer_) - 1)) {
+      this->parse_and_publish_forecast_(this->shared_buffer_);
       success_any = true;
     }
   }
@@ -190,12 +196,14 @@ void WeatherBOM::do_fetch() {
   // 3) Warnings
   // ---------------------------------------------------------------------------
   if (this->enable_warnings_) {
-    std::string url = "https://api.weather.bom.gov.au/v1/locations/" +
-                      this->geohash_ + "/warnings";
+    snprintf(this->url_buffer_, sizeof(this->url_buffer_),
+             "https://api.weather.bom.gov.au/v1/locations/%s/warnings",
+             this->geohash_);
 
-    ESP_LOGD(TAG, "Fetching warnings: %s", url.c_str());
-    if (this->fetch_url_(url, body, sizeof(body) - 1)) {
-      this->parse_and_publish_warnings_(body);
+    ESP_LOGD(TAG, "Fetching warnings: %s", this->url_buffer_);
+    if (this->fetch_url_(this->url_buffer_, this->shared_buffer_,
+                         sizeof(this->shared_buffer_) - 1)) {
+      this->parse_and_publish_warnings_(this->shared_buffer_);
       success_any = true;
     }
   }
@@ -204,6 +212,8 @@ void WeatherBOM::do_fetch() {
   } else {
     ESP_LOGW(TAG, "All BOM fetches failed");
   }
+
+  ESP_LOGD(TAG, "Heap after do_fetch: %u bytes", esp_get_free_heap_size());
 }
 
 bool WeatherBOM::resolve_geohash_if_needed_() {
@@ -227,21 +237,19 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
     return false;
   }
 
-  char q[128];
-  snprintf(q, sizeof(q),
-           "https://api.weather.bom.gov.au/v1/locations?search=%f,%f", lat,
-           lon);
-  ESP_LOGD(TAG, "Resolving geohash with URL: %s", q);
+  snprintf(this->url_buffer_, sizeof(this->url_buffer_),
+           "https://api.weather.bom.gov.au/v1/locations?search=%f,%f", lat, lon);
+  ESP_LOGD(TAG, "Resolving geohash with URL: %s", this->url_buffer_);
 
-  char resp[32769];  // Same buffer size
-  if (!this->fetch_url_(std::string(q), resp, sizeof(resp) - 1)) {
+  if (!this->fetch_url_(this->url_buffer_, this->shared_buffer_,
+                        sizeof(this->shared_buffer_) - 1)) {
     ESP_LOGW(TAG, "Failed to fetch geohash resolution response");
     return false;
   }
   ESP_LOGD(TAG, "Fetched %d bytes for geohash resolution: %.100s...",
-           (int)strlen(resp), resp);
+           (int)strlen(this->shared_buffer_), this->shared_buffer_);
 
-  cJSON* root = cJSON_ParseWithLength(resp, strlen(resp));
+  cJSON* root = cJSON_ParseWithLength(this->shared_buffer_, strlen(this->shared_buffer_));
   if (!root) {
     ESP_LOGW(TAG, "Failed to parse geohash JSON");
     return false;
@@ -263,13 +271,14 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
                  "Geohash '%s' too long (%d). Truncating to '%s' for BOM API.",
                  full_geohash.c_str(), (int)full_geohash.length(),
                  full_geohash.substr(0, 6).c_str());
-        this->geohash_ = full_geohash.substr(0, 6);
+        strncpy(this->geohash_, full_geohash.substr(0, 6).c_str(), sizeof(this->geohash_) - 1);
       } else {
-        this->geohash_ = full_geohash;
+        strncpy(this->geohash_, full_geohash.c_str(), sizeof(this->geohash_) - 1);
       }
+      this->geohash_[sizeof(this->geohash_) - 1] = '\0';
 
       ok = true;
-      ESP_LOGD(TAG, "Using geohash: %s", this->geohash_.c_str());
+      ESP_LOGD(TAG, "Using geohash: %s", this->geohash_);
 
       if (this->out_geohash_) {
         this->out_geohash_->publish_state(this->geohash_);
@@ -300,13 +309,15 @@ bool WeatherBOM::resolve_geohash_if_needed_() {
   return ok;
 }
 
-bool WeatherBOM::fetch_url_(const std::string& url, char* out, size_t max_len) {
-  static constexpr size_t MAX_HTTP_BODY = 32768;
+bool WeatherBOM::fetch_url_(const char *url, char *out, size_t max_len) {
+  ESP_LOGD(TAG, "Heap before fetch_url_: %u bytes", esp_get_free_heap_size());
+
+  static constexpr size_t MAX_HTTP_BODY = 8192;
 
   if (max_len > MAX_HTTP_BODY) max_len = MAX_HTTP_BODY;
 
   esp_http_client_config_t cfg = {};
-  cfg.url = url.c_str();
+  cfg.url = url;
   cfg.timeout_ms = 5000;
   cfg.transport_type = HTTP_TRANSPORT_OVER_SSL;
   cfg.crt_bundle_attach = esp_crt_bundle_attach;
@@ -315,21 +326,20 @@ bool WeatherBOM::fetch_url_(const std::string& url, char* out, size_t max_len) {
 
   esp_http_client_handle_t client = esp_http_client_init(&cfg);
   if (!client) {
-    ESP_LOGE(TAG, "esp_http_client_init failed for %s", url.c_str());
+    ESP_LOGE(TAG, "esp_http_client_init failed for %s", url);
     return false;
   }
 
   esp_err_t err = esp_http_client_set_method(client, HTTP_METHOD_GET);
   if (err != ESP_OK) {
-    ESP_LOGE(TAG, "set_method failed: %s for %s", esp_err_to_name(err),
-             url.c_str());
+    ESP_LOGE(TAG, "set_method failed: %s for %s", esp_err_to_name(err), url);
     esp_http_client_cleanup(client);
     return false;
   }
 
   err = esp_http_client_open(client, 0);
   if (err != ESP_OK) {
-    ESP_LOGE(TAG, "open failed: %s for %s", esp_err_to_name(err), url.c_str());
+    ESP_LOGE(TAG, "open failed: %s for %s", esp_err_to_name(err), url);
     esp_http_client_cleanup(client);
     return false;
   }
@@ -337,10 +347,10 @@ bool WeatherBOM::fetch_url_(const std::string& url, char* out, size_t max_len) {
   int content_length = esp_http_client_fetch_headers(client);
   int status = esp_http_client_get_status_code(client);
   ESP_LOGD(TAG, "HTTP status: %d, content_length: %d for %s", status,
-           content_length, url.c_str());
+           content_length, url);
 
   if (status != 200) {
-    ESP_LOGW(TAG, "Non-200 status %d for %s", status, url.c_str());
+    ESP_LOGW(TAG, "Non-200 status %d for %s", status, url);
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
     return false;
@@ -349,7 +359,7 @@ bool WeatherBOM::fetch_url_(const std::string& url, char* out, size_t max_len) {
   // If server claims a huge body, don't even try.
   if (content_length > 0 && content_length > (int)max_len) {
     ESP_LOGW(TAG, "Content-Length %d > max_len (%d) for %s, skipping",
-             content_length, (int)max_len, url.c_str());
+             content_length, (int)max_len, url);
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
     return false;
@@ -360,7 +370,7 @@ bool WeatherBOM::fetch_url_(const std::string& url, char* out, size_t max_len) {
   while (true) {
     int r = esp_http_client_read(client, buf, sizeof(buf));
     if (r < 0) {
-      ESP_LOGE(TAG, "Read error: %d for %s", r, url.c_str());
+      ESP_LOGE(TAG, "Read error: %d for %s", r, url);
       break;
     }
     if (r == 0) break;
@@ -368,7 +378,7 @@ bool WeatherBOM::fetch_url_(const std::string& url, char* out, size_t max_len) {
     size_t remaining = max_len - total;
     if (remaining == 0) {
       ESP_LOGW(TAG, "Response reached max_len (%d) for %s, truncating",
-               (int)max_len, url.c_str());
+               (int)max_len, url);
       break;
     }
     if ((size_t)r > remaining) r = (int)remaining;
@@ -383,11 +393,14 @@ bool WeatherBOM::fetch_url_(const std::string& url, char* out, size_t max_len) {
 
   bool success = total > 0;
   if (!success)
-    ESP_LOGW(TAG, "Empty or truncated response for %s", url.c_str());
+    ESP_LOGW(TAG, "Empty or truncated response for %s", url);
+
+  ESP_LOGD(TAG, "Heap after fetch_url_: %u bytes", esp_get_free_heap_size());
   return success;
 }
 
 void WeatherBOM::parse_and_publish_observations_(const char* json) {
+  ESP_LOGD(TAG, "Heap before parse observations: %u bytes", esp_get_free_heap_size());
   ESP_LOGD(TAG, "Parsing observations JSON: %.100s...", json);
 
   cJSON* root = cJSON_ParseWithLength(json, strlen(json));
@@ -433,6 +446,7 @@ void WeatherBOM::parse_and_publish_observations_(const char* json) {
   }
 
   cJSON_Delete(root);
+  ESP_LOGD(TAG, "Heap after parse observations: %u bytes", esp_get_free_heap_size());
 }
 
 // file-local helpers for forecast parsing
@@ -466,6 +480,7 @@ void WeatherBOM::parse_and_publish_forecast_(const char* json) {
     return;
   }
 
+  ESP_LOGD(TAG, "Heap before parse forecast: %u bytes", esp_get_free_heap_size());
   ESP_LOGD(TAG, "Parsing forecast JSON: %.100s...", json);
   cJSON* root = cJSON_ParseWithLength(json, strlen(json));
   if (!root) {
@@ -554,6 +569,7 @@ void WeatherBOM::parse_and_publish_forecast_(const char* json) {
   }
 
   cJSON_Delete(root);
+  ESP_LOGD(TAG, "Heap after parse forecast: %u bytes", esp_get_free_heap_size());
 }
 
 void WeatherBOM::parse_and_publish_warnings_(const char* json) {
@@ -564,6 +580,7 @@ void WeatherBOM::parse_and_publish_warnings_(const char* json) {
     return;
   }
 
+  ESP_LOGD(TAG, "Heap before parse warnings: %u bytes", esp_get_free_heap_size());
   ESP_LOGD(TAG, "Parsing warnings JSON: %.100s...", json);
   cJSON* root = cJSON_ParseWithLength(json, strlen(json));
   if (!root) {
@@ -592,6 +609,7 @@ void WeatherBOM::parse_and_publish_warnings_(const char* json) {
   }
 
   cJSON_Delete(root);
+  ESP_LOGD(TAG, "Heap after parse warnings: %u bytes", esp_get_free_heap_size());
 }
 
 void WeatherBOM::publish_last_update_() {

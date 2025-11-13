@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <cstring>
 
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
@@ -11,7 +12,10 @@ namespace weather_bom {
 class WeatherBOM : public PollingComponent {
  public:
   // Input setters
-  void set_geohash(const std::string &g) { geohash_ = g; }
+  void set_geohash(const std::string &g) {
+    strncpy(geohash_, g.c_str(), sizeof(geohash_) - 1);
+    geohash_[sizeof(geohash_) - 1] = '\0';
+  }
   void set_static_lat(float v) {
     static_lat_ = v;
     have_static_lat_ = true;
@@ -86,7 +90,9 @@ class WeatherBOM : public PollingComponent {
  protected:
   bool initial_fetch_done_ = false;
 
-  std::string geohash_;
+  char geohash_[8] = {0};
+  char shared_buffer_[8192] = {0};
+  char url_buffer_[128] = {0};
   bool have_static_lat_{false}, have_static_lon_{false};
   float static_lat_{0}, static_lon_{0};
   sensor::Sensor *lat_sensor_{nullptr};
@@ -132,7 +138,7 @@ class WeatherBOM : public PollingComponent {
   bool enable_warnings_{true};
 
   bool resolve_geohash_if_needed_();
-  bool fetch_url_(const std::string &url, char *out, size_t max_len);
+  bool fetch_url_(const char *url, char *out, size_t max_len);
   void parse_and_publish_observations_(const char *json);
   void parse_and_publish_forecast_(const char *json);
   void parse_and_publish_warnings_(const char *json);
