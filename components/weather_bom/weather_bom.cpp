@@ -98,9 +98,17 @@ void WeatherBOM::loop() {
   if (!this->initial_fetch_done_) {
     if (wifi::global_wifi_component != nullptr &&
         wifi::global_wifi_component->is_connected()) {
-      ESP_LOGD(TAG, "WiFi connected after boot — fetching weather now");
-      this->initial_fetch_done_ = true;
-      this->update();
+      if (this->wifi_connected_time_ == 0) {
+        this->wifi_connected_time_ = millis();
+        ESP_LOGD(TAG, "WiFi connected, starting 15s delay");
+      } else if (millis() - this->wifi_connected_time_ >= 15000) {
+        ESP_LOGD(TAG, "15s delay passed, fetching weather now");
+        this->initial_fetch_done_ = true;
+        this->update();
+      }
+    } else {
+      // If wifi disconnects, reset the timer
+      this->wifi_connected_time_ = 0;
     }
   }
 }
