@@ -73,6 +73,11 @@ class WeatherBOM : public PollingComponent {
     last_update_ = t;
   }
 
+  // Enable/disable fetching
+  void set_enable_observations(bool v) { enable_observations_ = v; }
+  void set_enable_forecast(bool v) { enable_forecast_ = v; }
+  void set_enable_warnings(bool v) { enable_warnings_ = v; }
+
   void setup() override;
   void loop() override;
   void update() override;
@@ -120,6 +125,11 @@ class WeatherBOM : public PollingComponent {
   text_sensor::TextSensor *location_name_{nullptr};
   text_sensor::TextSensor *out_geohash_{nullptr};
   text_sensor::TextSensor *last_update_{nullptr};
+
+  // Enable/disable fetching
+  bool enable_observations_{true};
+  bool enable_forecast_{true};
+  bool enable_warnings_{true};
 
   bool resolve_geohash_if_needed_();
   bool fetch_url_(const std::string &url, char *out, size_t max_len);

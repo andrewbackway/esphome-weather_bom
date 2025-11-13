@@ -56,6 +56,13 @@ void WeatherBOM::dump_config() {
   LOG_TEXT_SENSOR("  ", "Location Name", this->location_name_);
   LOG_TEXT_SENSOR("  ", "Out Geohash", this->out_geohash_);
   LOG_TEXT_SENSOR("  ", "Last Update", this->last_update_);
+
+  ESP_LOGCONFIG(TAG, "  Enable Observations: %s",
+                this->enable_observations_ ? "yes" : "no");
+  ESP_LOGCONFIG(TAG, "  Enable Forecast: %s",
+                this->enable_forecast_ ? "yes" : "no");
+  ESP_LOGCONFIG(TAG, "  Enable Warnings: %s",
+                this->enable_warnings_ ? "yes" : "no");
 }
 
 void WeatherBOM::setup() {
@@ -146,7 +153,7 @@ void WeatherBOM::do_fetch() {
     if (!this->resolve_geohash_if_needed_()) {
       ESP_LOGW(TAG, "Could not resolve geohash (need lat/lon)");
       return;
-  }
+    }
   }
 
   char body[32769];  // 32KB + 1 for null
@@ -154,7 +161,7 @@ void WeatherBOM::do_fetch() {
   // ---------------------------------------------------------------------------
   // 1) Observations
   // ---------------------------------------------------------------------------
-  {
+  if (this->enable_observations_) {
     std::string url = "https://api.weather.bom.gov.au/v1/locations/" +
                       this->geohash_ + "/observations";
 
@@ -168,7 +175,7 @@ void WeatherBOM::do_fetch() {
   // ---------------------------------------------------------------------------
   // 2) Daily forecast
   // ---------------------------------------------------------------------------
-  {
+  if (this->enable_forecast_) {
     std::string url = "https://api.weather.bom.gov.au/v1/locations/" +
                       this->geohash_ + "/forecasts/daily";
 
@@ -182,7 +189,7 @@ void WeatherBOM::do_fetch() {
   // ---------------------------------------------------------------------------
   // 3) Warnings
   // ---------------------------------------------------------------------------
-  {
+  if (this->enable_warnings_) {
     std::string url = "https://api.weather.bom.gov.au/v1/locations/" +
                       this->geohash_ + "/warnings";
 
@@ -192,7 +199,6 @@ void WeatherBOM::do_fetch() {
       success_any = true;
     }
   }
-
   if (success_any) {
     this->publish_last_update_();
   } else {

@@ -20,6 +20,7 @@ Works entirely on-device using **ESP-IDF** networking and TLS, ideal for custom 
   - **Active warnings** (raw JSON string)  
   - **Location name & resolved geohash**  
   - **Last update timestamp (ISO-8601)**  
+- ✅ **Selective fetching** — enable/disable observations, forecast, or warnings individually  
 - ✅ Compatible with ESP32 / ESP32-S3 under ESPHome 2025.10+
 
 ---
@@ -80,6 +81,11 @@ weather_bom:
   latitude_sensor: gps_lat
   longitude_sensor: gps_lon
   update_interval: 300s
+
+  # Optional: Enable/disable specific data fetching (default: all enabled)
+  enable_observations: true
+  enable_forecast: true
+  enable_warnings: true
 
   temperature:
     name: "Weather Temperature"

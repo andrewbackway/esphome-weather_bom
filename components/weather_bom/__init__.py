@@ -54,6 +54,11 @@ CONF_LOCATION_NAME = "location_name"
 CONF_OUT_GEOHASH = "out_geohash"
 CONF_LAST_UPDATE = "last_update"
 
+# Enable/disable fetching
+CONF_ENABLE_OBSERVATIONS = "enable_observations"
+CONF_ENABLE_FORECAST = "enable_forecast"
+CONF_ENABLE_WARNINGS = "enable_warnings"
+
 
 def _validate_location(cfg):
     gh = cfg.get(CONF_GEOHASH)
@@ -175,6 +180,10 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_LAST_UPDATE): text_sensor.text_sensor_schema(
                 icon=ICON_CLOCK
             ),
+            # Enable/disable fetching
+            cv.Optional(CONF_ENABLE_OBSERVATIONS, default=True): cv.boolean,
+            cv.Optional(CONF_ENABLE_FORECAST, default=True): cv.boolean,
+            cv.Optional(CONF_ENABLE_WARNINGS, default=True): cv.boolean,
         }
     ).extend(cv.polling_component_schema("300s")),
     _validate_location,
@@ -237,3 +246,11 @@ async def to_code(config):
     await _reg_text(CONF_LOCATION_NAME, "set_location_name_text")
     await _reg_text(CONF_OUT_GEOHASH, "set_out_geohash_text")
     await _reg_text(CONF_LAST_UPDATE, "set_last_update_text")
+
+    # Enable/disable fetching
+    if CONF_ENABLE_OBSERVATIONS in config:
+        cg.add(var.set_enable_observations(config[CONF_ENABLE_OBSERVATIONS]))
+    if CONF_ENABLE_FORECAST in config:
+        cg.add(var.set_enable_forecast(config[CONF_ENABLE_FORECAST]))
+    if CONF_ENABLE_WARNINGS in config:
+        cg.add(var.set_enable_warnings(config[CONF_ENABLE_WARNINGS]))
