@@ -75,7 +75,6 @@ void WeatherBOM::setup() {
     this->lat_sensor_->add_on_state_callback([this](float v) {
       this->dynamic_lat_ = v;
       this->have_dynamic_ = !std::isnan(v) && !std::isnan(this->dynamic_lon_);
-      if (this->have_dynamic_ && strlen(this->geohash_) == 0) this->update();
     });
   }
 
@@ -83,7 +82,6 @@ void WeatherBOM::setup() {
     this->lon_sensor_->add_on_state_callback([this](float v) {
       this->dynamic_lon_ = v;
       this->have_dynamic_ = !std::isnan(this->dynamic_lat_) && !std::isnan(v);
-      if (this->have_dynamic_ && strlen(this->geohash_) == 0) this->update();
     });
   }
 
