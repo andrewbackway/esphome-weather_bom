@@ -100,7 +100,11 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_LONGITUDE): cv.float_,
             cv.Optional(CONF_LAT_SENSOR): cv.use_id(sensor.Sensor),
             cv.Optional(CONF_LON_SENSOR): cv.use_id(sensor.Sensor),
-
+             # Enable/disable fetching
+            cv.Optional(CONF_ENABLE_OBSERVATIONS, default=True): cv.boolean,
+            cv.Optional(CONF_ENABLE_FORECAST, default=True): cv.boolean,
+            cv.Optional(CONF_ENABLE_WARNINGS, default=True): cv.boolean,
+        
             # Observations
             cv.Optional(CONF_TEMPERATURE): sensor.sensor_schema(
                 unit_of_measurement="°C",
@@ -180,11 +184,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_LAST_UPDATE): text_sensor.text_sensor_schema(
                 icon=ICON_CLOCK
             ),
-            # Enable/disable fetching
-            cv.Optional(CONF_ENABLE_OBSERVATIONS, default=True): cv.boolean,
-            cv.Optional(CONF_ENABLE_FORECAST, default=True): cv.boolean,
-            cv.Optional(CONF_ENABLE_WARNINGS, default=True): cv.boolean,
-        }
+         }
     ).extend(cv.polling_component_schema("300s")),
     _validate_location,
 )
