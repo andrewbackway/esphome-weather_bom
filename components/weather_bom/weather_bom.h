@@ -89,7 +89,6 @@ class WeatherBOM : public PollingComponent {
 
  protected:
   bool initial_fetch_done_ = false;
-  bool delay_applied_ = false;
 
   char geohash_[8] = {0};
   char shared_buffer_[8192] = {0};

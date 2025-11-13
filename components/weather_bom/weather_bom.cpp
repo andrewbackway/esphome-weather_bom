@@ -117,13 +117,9 @@ void WeatherBOM::update() {
     return;
   }
 
-  if (!this->delay_applied_) {
-    ESP_LOGD(TAG, "Applying 15-second delay after WiFi restoration...");
-    vTaskDelay(pdMS_TO_TICKS(15000));
-    this->delay_applied_ = true;
-  }
+  this->running_ = true;
 
-  this->running_ = true;  BaseType_t res = xTaskCreate(&WeatherBOM::fetch_task,  // Task function
+  BaseType_t res = xTaskCreate(&WeatherBOM::fetch_task,  // Task function
                                "bom_fetch",              // Name
                                8192,                     // Stack size (words)
                                this,                     // Parameter
