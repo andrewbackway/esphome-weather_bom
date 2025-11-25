@@ -86,7 +86,7 @@ sensor:
     weather_bom_id: weather_bom_hub
     type: today_rain_max
     name: "Today's Rain Max"
-    
+
   - platform: weather_bom
     weather_bom_id: weather_bom_hub
     type: tomorrow_min
