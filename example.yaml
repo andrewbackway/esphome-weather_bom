@@ -35,7 +35,6 @@ time:
       - 1.au.pool.ntp.org
       - 2.au.pool.ntp.org
 
-# GPS sensors for dynamic location (template sensors used for example)
 sensor:
   - platform: template
     id: gps_lat
@@ -48,106 +47,56 @@ sensor:
     lambda: |-
       return 144.9631;
 
-  # Weather BOM sensors (numeric values)
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: temperature
-    name: "Weather Temperature"
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: humidity
-    name: "Weather Humidity"
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: wind_speed_kmh
-    name: "Weather Wind Speed (km/h)"
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: rain_since_9am
-    name: "Weather Rain Since 9AM"
-
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: today_min
-    name: "Weather Today Min Temp"
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: today_max
-    name: "Weather Today Max Temp"
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: today_rain_chance
-    name: "Weather Today Rain Chance"
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: today_rain_min
-    name: "Today's Rain Min"
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: today_rain_max
-    name: "Today's Rain Max"
-
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: tomorrow_min
-    name: "Weather Tomorrow Min Temp"
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: tomorrow_max
-    name: "Weather Tomorrow Max Temp"
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: tomorrow_rain_chance
-    name: "Weather Tomorrow Rain Chance"
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: tomorrow_rain_min
-    name: "Tomorrow Rain Min"
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: tomorrow_rain_max
-    name: "Tomorrow Rain Max"
-
-# Weather BOM hub configuration
 weather_bom:
-  id: weather_bom_hub
   latitude_sensor: gps_lat
   longitude_sensor: gps_lon
   update_interval: 300s
 
-# Weather BOM text sensors (string values)
-text_sensor:
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: today_summary
+  temperature:
+    name: "Weather Temperature"
+  humidity:
+    name: "Weather Humidity"
+  wind_speed_kmh:
+    name: "Weather Wind Speed (km/h)"
+  rain_since_9am:
+    name: "Weather Rain Since 9AM"
+
+  today_min:
+    name: "Weather Today Min Temp"
+  today_max:
+    name: "Weather Today Max Temp"
+  today_rain_chance:
+    name: "Weather Today Rain Chance"
+  today_summary:
     name: "Weather Today Summary"
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: today_icon
+  today_icon:
     name: "Weather Today Icon"
-
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: tomorrow_summary
+  today_rain_min:
+    name: "Today's Rain Min"
+  today_rain_max:
+    name: "Today's Rain Max"
+    
+  tomorrow_min:
+    name: "Weather Tomorrow Min Temp"
+  tomorrow_max:
+    name: "Weather Tomorrow Max Temp"
+  tomorrow_rain_chance:
+    name: "Weather Tomorrow Rain Chance"
+  tomorrow_summary:
     name: "Weather Tomorrow Summary"
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: tomorrow_icon
+  tomorrow_icon:
     name: "Weather Tomorrow Icon"
+  tomorrow_rain_min:
+    name: "Tomorrow Rain Min"
+  tomorrow_rain_max:
+    name: "Tomorrow Rain Max"
 
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: warnings_json
+
+  warnings_json:
     name: "Weather Warnings (JSON)"
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: location_name
+  location_name:
     name: "Weather Location Name"
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: out_geohash
+  out_geohash:
     name: "Weather Resolved Geohash"
-  - platform: weather_bom
-    weather_bom_id: weather_bom_hub
-    type: last_update
+  last_update:
     name: "Weather Last Update Time"
