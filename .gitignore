@@ -1,0 +1,16 @@
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ESPHome build artifacts
+.esphome/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# Secrets
+secrets.yaml

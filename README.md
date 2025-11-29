@@ -8,7 +8,7 @@ Works entirely on-device using **ESP-IDF** networking and TLS, ideal for custom 
 
 ## ✨ Features
 
-- ✅ **No Home Assistant required** — direct HTTPS access to BoM’s public API  
+- ✅ **No Home Assistant required** — direct HTTPS access to BoM's public API  
 - ✅ **ESP-IDF native** (`esp_http_client`, `esp_crt_bundle_attach`)  
 - ✅ Auto-resolves **BoM geohash** from:
   - Static latitude/longitude  
@@ -21,7 +21,8 @@ Works entirely on-device using **ESP-IDF** networking and TLS, ideal for custom 
   - **Location name & resolved geohash**  
   - **Last update timestamp (ISO-8601)**  
 - ✅ **Selective fetching** — enable/disable observations, forecast, or warnings individually  
-- ✅ Compatible with ESP32 / ESP32-S3 under ESPHome 2025.10+
+- ✅ Compatible with ESP32 / ESP32-S3 under ESPHome 2025.11+
+- ✅ Uses ESPHome's **standard platform-based sensor pattern** for compatibility with ESPHome 2025.11+
 
 ---
 
@@ -65,7 +66,19 @@ time:
       - 1.au.pool.ntp.org
       - 2.au.pool.ntp.org
 
+# Define the weather_bom hub
+weather_bom:
+  id: weather_bom_hub
+  latitude_sensor: gps_lat
+  longitude_sensor: gps_lon
+  update_interval: 300s
+  # Optional: Enable/disable specific data fetching (default: all enabled)
+  enable_observations: true
+  enable_forecast: true
+  enable_warnings: true
+
 sensor:
+  # GPS sensors for location
   - platform: template
     id: gps_lat
     name: "GPS Latitude"
@@ -77,75 +90,143 @@ sensor:
     lambda: |-
       return 144.9631;
 
-weather_bom:
-  latitude_sensor: gps_lat
-  longitude_sensor: gps_lon
-  update_interval: 300s
-
-  # Optional: Enable/disable specific data fetching (default: all enabled)
-  enable_observations: true
-  enable_forecast: true
-  enable_warnings: true
-
-  temperature:
+  # Weather observations
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: temperature
     name: "Weather Temperature"
-  humidity:
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: humidity
     name: "Weather Humidity"
-  wind_speed_kmh:
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: wind_speed_kmh
     name: "Weather Wind Speed (km/h)"
-  rain_since_9am:
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: rain_since_9am
     name: "Weather Rain Since 9AM"
 
-  today_min:
+  # Today's forecast
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: today_min
     name: "Weather Today Min Temp"
-  today_max:
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: today_max
     name: "Weather Today Max Temp"
-  today_rain_chance:
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: today_rain_chance
     name: "Weather Today Rain Chance"
-  today_summary:
-    name: "Weather Today Summary"
-  today_icon:
-    name: "Weather Today Icon"
-  today_rain_min:
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: today_rain_min
     name: "Today's Rain Min"
-  today_rain_max:
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: today_rain_max
     name: "Today's Rain Max"
-    
-  tomorrow_min:
+
+  # Tomorrow's forecast
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: tomorrow_min
     name: "Weather Tomorrow Min Temp"
-  tomorrow_max:
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: tomorrow_max
     name: "Weather Tomorrow Max Temp"
-  tomorrow_rain_chance:
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: tomorrow_rain_chance
     name: "Weather Tomorrow Rain Chance"
-  tomorrow_summary:
-    name: "Weather Tomorrow Summary"
-  tomorrow_icon:
-    name: "Weather Tomorrow Icon"
-  tomorrow_rain_min:
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: tomorrow_rain_min
     name: "Tomorrow Rain Min"
-  tomorrow_rain_max:
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: tomorrow_rain_max
     name: "Tomorrow Rain Max"
 
-  warnings_json:
+text_sensor:
+  # Today's forecast text
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: today_summary
+    name: "Weather Today Summary"
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: today_icon
+    name: "Weather Today Icon"
+
+  # Tomorrow's forecast text
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: tomorrow_summary
+    name: "Weather Tomorrow Summary"
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: tomorrow_icon
+    name: "Weather Tomorrow Icon"
+
+  # Metadata
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: warnings_json
     name: "Weather Warnings (JSON)"
-  location_name:
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: location_name
     name: "Weather Location Name"
-  out_geohash:
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: out_geohash
     name: "Weather Resolved Geohash"
-  last_update:
+  - platform: weather_bom
+    weather_bom_id: weather_bom_hub
+    type: last_update
     name: "Weather Last Update Time"
 ```
 
 ---
 
-## 🧩 Published Entities
+## 🧩 Sensor Types
 
-| Category | ID | Type | Description |
-|-----------|----|------|-------------|
-| **Observations** | `temperature`, `humidity`, `wind_speed_kmh` | Sensor | Current BoM observations |
-| **Forecast (Today)** | `today_min`, `today_max`, `today_rain_chance`, `today_rain_min`, `today_rain_max`, `today_summary`, `today_icon` | Sensor/Text | Current day forecast |
-| **Forecast (Tomorrow)** | `tomorrow_min`, `tomorrow_max`, `tomorrow_rain_chance`, `tomorrow_rain_min`, `tomorrow_rain_max` , `tomorrow_summary`, `tomorrow_icon` | Sensor/Text | Next day forecast |
-| **Metadata** | `warnings_json`, `location_name`, `out_geohash`, `last_update` | TextSensor | JSON warnings, location info, update time |
+### Numeric Sensors (platform: weather_bom under sensor:)
+
+| Type | Description | Unit |
+|------|-------------|------|
+| `temperature` | Current temperature | °C |
+| `humidity` | Current humidity | % |
+| `wind_speed_kmh` | Current wind speed | km/h |
+| `rain_since_9am` | Rain since 9 AM | mm |
+| `today_min` | Today's minimum temperature | °C |
+| `today_max` | Today's maximum temperature | °C |
+| `today_rain_chance` | Today's rain chance | % |
+| `today_rain_min` | Today's minimum rain | mm |
+| `today_rain_max` | Today's maximum rain | mm |
+| `tomorrow_min` | Tomorrow's minimum temperature | °C |
+| `tomorrow_max` | Tomorrow's maximum temperature | °C |
+| `tomorrow_rain_chance` | Tomorrow's rain chance | % |
+| `tomorrow_rain_min` | Tomorrow's minimum rain | mm |
+| `tomorrow_rain_max` | Tomorrow's maximum rain | mm |
+
+### Text Sensors (platform: weather_bom under text_sensor:)
+
+| Type | Description |
+|------|-------------|
+| `today_summary` | Today's weather summary |
+| `today_icon` | Today's weather icon descriptor |
+| `tomorrow_summary` | Tomorrow's weather summary |
+| `tomorrow_icon` | Tomorrow's weather icon descriptor |
+| `warnings_json` | Active weather warnings (JSON) |
+| `location_name` | Resolved location name |
+| `out_geohash` | Resolved geohash |
+| `last_update` | Last update timestamp (ISO-8601) |
 
 ---
 
