@@ -119,3 +119,5 @@ async def to_code(config):
     setter = setter_map.get(sensor_type)
     if setter:
         cg.add(getattr(hub, setter)(var))
+    else:
+        raise cv.Invalid(f"Unrecognized sensor type: {sensor_type}")
