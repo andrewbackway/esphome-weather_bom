@@ -1,21 +1,23 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import sensor, text_sensor
+from esphome.components import sensor
 from esphome.const import CONF_ID
 
-AUTO_LOAD = ["sensor", "text_sensor"]
 CODEOWNERS = ["@andrew-b"]
+MULTI_CONF = True
 
-ns = cg.esphome_ns.namespace("weather_bom")
-WeatherBOM = ns.class_("WeatherBOM", cg.PollingComponent)
+# Hub ID for child sensors/text_sensors to reference
+CONF_WEATHER_BOM_ID = "weather_bom_id"
 
-ICON_ALERT = "mdi:alert"
-ICON_THERMOMETER = "mdi:thermometer"
-ICON_RAIN_CHANCE = "mdi:umbrella-percent"
-ICON_RAIN_AMOUNT = "mdi:weather-rainy"
-ICON_WINDY = "mdi:weather-windy"
-ICON_HUMIDITY = "mdi:water-percent"
-ICON_CLOCK = "mdi:clock-outline"
+weather_bom_ns = cg.esphome_ns.namespace("weather_bom")
+WeatherBOM = weather_bom_ns.class_("WeatherBOM", cg.PollingComponent)
+
+# Schema for child sensors to inherit (reference to parent hub)
+HUB_CHILD_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(CONF_WEATHER_BOM_ID): cv.use_id(WeatherBOM),
+    }
+)
 
 # Inputs
 CONF_GEOHASH = "geohash"
@@ -23,36 +25,6 @@ CONF_LATITUDE = "latitude"
 CONF_LONGITUDE = "longitude"
 CONF_LAT_SENSOR = "latitude_sensor"
 CONF_LON_SENSOR = "longitude_sensor"
-
-# Observations
-CONF_TEMPERATURE = "temperature"
-CONF_HUMIDITY = "humidity"
-CONF_WIND_KMH = "wind_speed_kmh"
-CONF_RAIN_SINCE_9AM = "rain_since_9am"
-
-# Forecast Today
-CONF_TODAY_MIN = "today_min"
-CONF_TODAY_MAX = "today_max"
-CONF_TODAY_RAIN_CHANCE = "today_rain_chance"
-CONF_TODAY_SUMMARY = "today_summary"
-CONF_TODAY_ICON = "today_icon"
-CONF_TODAY_RAIN_MIN = "today_rain_min"
-CONF_TODAY_RAIN_MAX = "today_rain_max"
-
-# Forecast Tomorrow
-CONF_TOMORROW_MIN = "tomorrow_min"
-CONF_TOMORROW_MAX = "tomorrow_max"
-CONF_TOMORROW_RAIN_CHANCE = "tomorrow_rain_chance"
-CONF_TOMORROW_SUMMARY = "tomorrow_summary"
-CONF_TOMORROW_ICON = "tomorrow_icon"
-CONF_TOMORROW_RAIN_MIN = "tomorrow_rain_min"
-CONF_TOMORROW_RAIN_MAX = "tomorrow_rain_max"
-
-# Meta
-CONF_WARNINGS_JSON = "warnings_json"
-CONF_LOCATION_NAME = "location_name"
-CONF_OUT_GEOHASH = "out_geohash"
-CONF_LAST_UPDATE = "last_update"
 
 # Enable/disable fetching
 CONF_ENABLE_OBSERVATIONS = "enable_observations"
@@ -100,91 +72,11 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_LONGITUDE): cv.float_,
             cv.Optional(CONF_LAT_SENSOR): cv.use_id(sensor.Sensor),
             cv.Optional(CONF_LON_SENSOR): cv.use_id(sensor.Sensor),
-             # Enable/disable fetching
+            # Enable/disable fetching
             cv.Optional(CONF_ENABLE_OBSERVATIONS, default=True): cv.boolean,
             cv.Optional(CONF_ENABLE_FORECAST, default=True): cv.boolean,
             cv.Optional(CONF_ENABLE_WARNINGS, default=True): cv.boolean,
-        
-            # Observations
-            cv.Optional(CONF_TEMPERATURE): sensor.sensor_schema(
-                unit_of_measurement="°C",
-                icon=ICON_THERMOMETER,
-                accuracy_decimals=1,
-            ),
-            cv.Optional(CONF_HUMIDITY): sensor.sensor_schema(
-                unit_of_measurement="%",
-                icon=ICON_HUMIDITY,
-                accuracy_decimals=0,
-            ),
-            cv.Optional(CONF_WIND_KMH): sensor.sensor_schema(
-                unit_of_measurement="km/h",
-                icon=ICON_WINDY,
-                accuracy_decimals=0,
-            ),
-            cv.Optional(CONF_RAIN_SINCE_9AM): sensor.sensor_schema(
-                unit_of_measurement="mm",
-                icon=ICON_RAIN_AMOUNT,
-                accuracy_decimals=1,
-            ),
-
-            # Today
-            cv.Optional(CONF_TODAY_MIN): sensor.sensor_schema(
-                unit_of_measurement="°C",
-                icon=ICON_THERMOMETER,
-                accuracy_decimals=1
-            ),
-            cv.Optional(CONF_TODAY_MAX): sensor.sensor_schema(
-                unit_of_measurement="°C",
-                icon=ICON_THERMOMETER,
-                accuracy_decimals=1
-            ),
-            cv.Optional(CONF_TODAY_RAIN_CHANCE): sensor.sensor_schema(
-                unit_of_measurement="%",
-                icon=ICON_RAIN_CHANCE,
-                accuracy_decimals=0
-            ),
-            cv.Optional(CONF_TODAY_RAIN_MIN): sensor.sensor_schema(
-                icon=ICON_RAIN_AMOUNT
-            ),
-            cv.Optional(CONF_TODAY_RAIN_MAX): sensor.sensor_schema(
-                icon=ICON_RAIN_AMOUNT
-            ),
-            cv.Optional(CONF_TODAY_SUMMARY): text_sensor.text_sensor_schema(),
-            cv.Optional(CONF_TODAY_ICON): text_sensor.text_sensor_schema(),
-            # Tomorrow
-            cv.Optional(CONF_TOMORROW_MIN): sensor.sensor_schema(
-                unit_of_measurement="°C",
-                icon=ICON_THERMOMETER,
-                accuracy_decimals=1
-            ),
-            cv.Optional(CONF_TOMORROW_MAX): sensor.sensor_schema(
-                unit_of_measurement="°C",
-                icon=ICON_THERMOMETER,
-                accuracy_decimals=1
-            ),
-            cv.Optional(CONF_TOMORROW_RAIN_CHANCE): sensor.sensor_schema(
-                unit_of_measurement="%",
-                icon=ICON_RAIN_CHANCE,
-                accuracy_decimals=0
-            ),
-            cv.Optional(CONF_TOMORROW_RAIN_MIN): sensor.sensor_schema(
-                icon=ICON_RAIN_AMOUNT
-            ),
-            cv.Optional(CONF_TOMORROW_RAIN_MAX): sensor.sensor_schema(
-                icon=ICON_RAIN_AMOUNT
-            ),
-            cv.Optional(CONF_TOMORROW_SUMMARY): text_sensor.text_sensor_schema(),
-            cv.Optional(CONF_TOMORROW_ICON): text_sensor.text_sensor_schema(),
-            # Meta
-            cv.Optional(CONF_WARNINGS_JSON): text_sensor.text_sensor_schema(
-                icon=ICON_ALERT
-            ),
-            cv.Optional(CONF_LOCATION_NAME): text_sensor.text_sensor_schema(),
-            cv.Optional(CONF_OUT_GEOHASH): text_sensor.text_sensor_schema(),
-            cv.Optional(CONF_LAST_UPDATE): text_sensor.text_sensor_schema(
-                icon=ICON_CLOCK
-            ),
-         }
+        }
     ).extend(cv.polling_component_schema("300s")),
     _validate_location,
 )
@@ -206,46 +98,6 @@ async def to_code(config):
     if CONF_LON_SENSOR in config:
         lon_s = await cg.get_variable(config[CONF_LON_SENSOR])
         cg.add(var.set_lon_sensor(lon_s))
-
-    async def _reg(name, fn):
-        if name in config:
-            obj = await sensor.new_sensor(config[name])
-            cg.add(getattr(var, fn)(obj))
-
-    async def _reg_text(name, fn):
-        if name in config:
-            obj = await text_sensor.new_text_sensor(config[name])
-            cg.add(getattr(var, fn)(obj))
-
-    # Observations
-    await _reg(CONF_TEMPERATURE, "set_temperature_sensor")
-    await _reg(CONF_HUMIDITY, "set_humidity_sensor")
-    await _reg(CONF_WIND_KMH, "set_wind_kmh_sensor")
-    await _reg(CONF_RAIN_SINCE_9AM, "set_rain_since_9am_sensor")
-
-    # Today
-    await _reg(CONF_TODAY_MIN, "set_today_min_sensor")
-    await _reg(CONF_TODAY_MAX, "set_today_max_sensor")
-    await _reg(CONF_TODAY_RAIN_CHANCE, "set_today_rain_chance_sensor")
-    await _reg_text(CONF_TODAY_SUMMARY, "set_today_summary_text")
-    await _reg_text(CONF_TODAY_ICON, "set_today_icon_text")
-    await _reg(CONF_TODAY_RAIN_MIN, "set_today_rain_min_sensor")
-    await _reg(CONF_TODAY_RAIN_MAX, "set_today_rain_max_sensor")
-
-    # Tomorrow
-    await _reg(CONF_TOMORROW_MIN, "set_tomorrow_min_sensor")
-    await _reg(CONF_TOMORROW_MAX, "set_tomorrow_max_sensor")
-    await _reg(CONF_TOMORROW_RAIN_CHANCE, "set_tomorrow_rain_chance_sensor")
-    await _reg_text(CONF_TOMORROW_SUMMARY, "set_tomorrow_summary_text")
-    await _reg_text(CONF_TOMORROW_ICON, "set_tomorrow_icon_text")
-    await _reg(CONF_TOMORROW_RAIN_MIN, "set_tomorrow_rain_min_sensor")
-    await _reg(CONF_TOMORROW_RAIN_MAX, "set_tomorrow_rain_max_sensor")
-
-    # Meta
-    await _reg_text(CONF_WARNINGS_JSON, "set_warnings_json_text")
-    await _reg_text(CONF_LOCATION_NAME, "set_location_name_text")
-    await _reg_text(CONF_OUT_GEOHASH, "set_out_geohash_text")
-    await _reg_text(CONF_LAST_UPDATE, "set_last_update_text")
 
     # Enable/disable fetching
     if CONF_ENABLE_OBSERVATIONS in config:
