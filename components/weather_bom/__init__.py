@@ -85,12 +85,6 @@ CONFIG_SCHEMA = cv.All(
 
 
 async def to_code(config):
-    if not CORE.using_esp_idf:
-        raise cv.Invalid(
-            "weather_bom component requires the ESP-IDF framework. "
-            "Set 'framework: type: esp-idf' under your esp32: config."
-        )
-
     # Re-enable ESP-IDF's HTTP client (excluded by default since ESPHome 2026.x
     # to reduce compile time). Same pattern used by http_request and audio components.
     include_builtin_idf_component("esp_http_client")
