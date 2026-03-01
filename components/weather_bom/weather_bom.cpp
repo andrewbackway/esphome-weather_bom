@@ -4,6 +4,8 @@
 #include <ctime>
 #include <cstring>
 
+#ifdef USE_ESP_IDF
+
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
@@ -624,3 +626,5 @@ void WeatherBOM::publish_last_update_() {
 
 }  // namespace weather_bom
 }  // namespace esphome
+
+#endif  // USE_ESP_IDF

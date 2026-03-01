@@ -2,6 +2,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor
 from esphome.const import CONF_ID
+from esphome.core import CORE
 
 CODEOWNERS = ["@andrew-b"]
 MULTI_CONF = True
@@ -83,6 +84,12 @@ CONFIG_SCHEMA = cv.All(
 
 
 async def to_code(config):
+    if not CORE.using_esp_idf:
+        raise cv.Invalid(
+            "weather_bom component requires the ESP-IDF framework. "
+            "Set 'framework: type: esp-idf' under your esp32: config."
+        )
+
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
