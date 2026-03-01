@@ -90,6 +90,12 @@ async def to_code(config):
             "Set 'framework: type: esp-idf' under your esp32: config."
         )
 
+    # Declare ESP-IDF component dependencies using the idf:: prefix so
+    # PlatformIO maps them to cmake REQUIRES, adding the correct include paths.
+    cg.add_library("idf::esp_http_client", None)
+    cg.add_library("idf::esp_crt_bundle", None)
+    cg.add_library("idf::json", None)  # cJSON
+
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
